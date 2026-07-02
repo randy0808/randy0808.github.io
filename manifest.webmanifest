@@ -1,0 +1,19 @@
+{
+  "name": "資產儀表板",
+  "short_name": "資產",
+  "description": "跨平台個人資產追蹤 PWA",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f8f5",
+  "theme_color": "#0b7a75",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
