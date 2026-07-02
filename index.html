@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0b7a75">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="資產儀表板">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>資產儀表板</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <img class="brand-mark" src="icon.svg" alt="">
+          <div>
+            <h1>資產儀表板</h1>
+            <p id="syncStatus">尚未同步市場價格</p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <div class="segmented" aria-label="總資產幣別">
+            <button class="segment is-active" type="button" data-base-currency="TWD">TWD</button>
+            <button class="segment" type="button" data-base-currency="USD">USD</button>
+          </div>
+          <button class="button button-primary" type="button" id="refreshButton">
+            <span aria-hidden="true">↻</span>
+            更新
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="summary-grid" aria-label="資產總覽">
+          <article class="metric-card">
+            <span class="metric-label">總資產</span>
+            <strong id="totalValue">--</strong>
+            <small id="positionCount">0 筆資產</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">總成本</span>
+            <strong id="totalCost">--</strong>
+            <small id="baseCurrencyHint">以 TWD 顯示</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">未實現損益</span>
+            <strong id="totalProfit">--</strong>
+            <small id="totalProfitPercent">--</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">報價狀態</span>
+            <strong id="quoteHealth">--</strong>
+            <small id="fxStatus">匯率尚未更新</small>
+          </article>
+        </section>
+
+        <section class="workspace-grid">
+          <section class="panel">
+            <div class="panel-heading">
+              <h2 id="formTitle">新增資產</h2>
+              <button class="text-button is-hidden" type="button" id="cancelEditButton">取消編輯</button>
+            </div>
+
+            <form id="assetForm" autocomplete="off">
+              <input type="hidden" id="editingId">
+              <div class="form-grid">
+                <label>
+                  <span>類型</span>
+                  <select id="assetKind">
+                    <option value="crypto">加密貨幣</option>
+                    <option value="us-stock">美股</option>
+                    <option value="tw-stock">台股</option>
+                    <option value="manual">手動資產</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>代號</span>
+                  <input id="assetSymbol" type="text" placeholder="BTC, ETH, AAPL, 2330" required>
+                </label>
+
+                <label class="wide">
+                  <span>名稱</span>
+                  <input id="assetName" type="text" placeholder="可留空">
+                </label>
+
+                <label>
+                  <span>數量</span>
+                  <input id="assetQuantity" type="number" min="0" step="any" inputmode="decimal" required>
+                </label>
+
+                <label>
+                  <span>平均成本</span>
+                  <input id="assetAverageCost" type="number" min="0" step="any" inputmode="decimal" required>
+                </label>
+
+                <label>
+                  <span>成本幣別</span>
+                  <select id="costCurrency">
+                    <option value="QUOTE">跟報價相同</option>
+                    <option value="TWD">TWD</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </label>
+
+                <label class="manual-field">
+                  <span>手動現價</span>
+                  <input id="manualPrice" type="number" min="0" step="any" inputmode="decimal">
+                </label>
+
+                <label class="manual-field">
+                  <span>現價幣別</span>
+                  <select id="manualCurrency">
+                    <option value="TWD">TWD</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="form-actions">
+                <button class="button button-primary" type="submit" id="submitAssetButton">新增資產</button>
+                <button class="button button-secondary" type="button" id="exportButton">匯出</button>
+                <button class="button button-secondary" type="button" id="importButton">匯入</button>
+                <input class="file-input" id="importFile" type="file" accept="application/json">
+              </div>
+            </form>
+          </section>
+
+          <section class="panel allocation-panel">
+            <div class="panel-heading">
+              <h2>資產配置</h2>
+              <span id="allocationTotal">--</span>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="allocationChart" width="260" height="260" aria-label="資產配置圖"></canvas>
+              <div id="allocationLegend" class="legend"></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="panel holdings-panel">
+          <div class="panel-heading holdings-heading">
+            <div>
+              <h2>持倉</h2>
+              <p id="statusMessage">新增資產後會開始追蹤市值與損益。</p>
+            </div>
+            <label class="search-box">
+              <span>搜尋</span>
+              <input id="positionSearch" type="search" placeholder="代號或名稱">
+            </label>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>資產</th>
+                  <th>數量</th>
+                  <th>平均成本</th>
+                  <th>現價</th>
+                  <th>市值</th>
+                  <th>損益</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="positionsBody"></tbody>
+            </table>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <strong>尚未新增資產</strong>
+            <span>先輸入 BTC、ETH、AAPL 或 2330 這類代號。</span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
