@@ -306,12 +306,19 @@ select:focus {
 
 .legend-row {
   display: grid;
-  grid-template-columns: 12px minmax(6.5rem, 1fr) minmax(0, 12.5rem);
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "dot label label"
+    ". value percent";
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 1px;
 }
 
 .legend-dot {
+  grid-area: dot;
+  align-self: start;
+  margin-top: 0.42em;
   width: 12px;
   height: 12px;
   border-radius: 999px;
@@ -324,24 +331,28 @@ select:focus {
   white-space: nowrap;
 }
 
-.legend-values {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 4.2em;
-  justify-content: flex-end;
-  align-items: baseline;
-  gap: 10px;
+.legend strong {
+  grid-area: label;
   min-width: 0;
-  width: 100%;
 }
 
 .legend-market-value {
+  grid-area: value;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: right;
+  white-space: nowrap;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .legend-percent {
+  grid-area: percent;
+  min-width: 4.2em;
   text-align: right;
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .holdings-panel {
