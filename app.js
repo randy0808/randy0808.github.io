@@ -186,6 +186,7 @@ function render() {
   el.total.textContent = currency(t.value);
   el.total.className = valueClass(t.value);
   el.cost.textContent = currency(t.cost);
+  el.cost.className = valueClass(t.cost);
   el.profit.textContent = currency(profit);
   el.profit.className = valueClass(profit);
   el.profitPct.textContent = percent(t.cost > 0 ? profit / t.cost * 100 : NaN);
@@ -216,10 +217,13 @@ function renderRows() {
     const ch = Number(m.q?.changePercent);
     const qPriceClass = valueClass(qPrice);
     const chClass = valueClass(ch);
+    const qtyClass = valueClass(p.quantity);
+    const avgClass = valueClass(p.averageCost);
+    const costClass = valueClass(m.cost);
     const valueCellClass = valueClass(m.value);
     const profitClass = valueClass(m.profit);
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><div class="asset-cell"><span class="asset-badge">${esc(p.symbol.replace(/\..+$/, "").slice(0, 3))}</span><span class="asset-title"><strong>${esc(p.name)}</strong><small>${esc(p.symbol)} · ${esc(KIND[p.kind])}</small></span></div></td><td>${number(p.quantity)}</td><td>${currency(p.averageCost, m.ccur)}<div class="sub-value">${currency(m.cost)}</div></td><td class="${qPriceClass}">${Number.isFinite(qPrice) ? currency(qPrice, m.qcur) : "--"}<div class="sub-value ${chClass}">${Number.isFinite(ch) ? percent(ch) : esc(m.q?.source || "等待報價")}</div></td><td class="${valueCellClass}">${currency(m.value)}</td><td class="${profitClass}">${currency(m.profit)}<div>${percent(m.profitPct)}</div></td><td><div class="row-actions"><button class="row-button" data-action="edit" data-id="${esc(p.id)}" type="button">編輯</button><button class="row-button danger" data-action="delete" data-id="${esc(p.id)}" type="button">刪除</button></div></td>`;
+    tr.innerHTML = `<td><div class="asset-cell"><span class="asset-badge">${esc(p.symbol.replace(/\..+$/, "").slice(0, 3))}</span><span class="asset-title"><strong>${esc(p.name)}</strong><small>${esc(p.symbol)} · ${esc(KIND[p.kind])}</small></span></div></td><td class="${qtyClass}">${number(p.quantity)}</td><td class="${avgClass}">${currency(p.averageCost, m.ccur)}<div class="sub-value ${costClass}">${currency(m.cost)}</div></td><td class="${qPriceClass}">${Number.isFinite(qPrice) ? currency(qPrice, m.qcur) : "--"}<div class="sub-value ${chClass}">${Number.isFinite(ch) ? percent(ch) : esc(m.q?.source || "等待報價")}</div></td><td class="${valueCellClass}">${currency(m.value)}</td><td class="${profitClass}">${currency(m.profit)}<div>${percent(m.profitPct)}</div></td><td><div class="row-actions"><button class="row-button" data-action="edit" data-id="${esc(p.id)}" type="button">編輯</button><button class="row-button danger" data-action="delete" data-id="${esc(p.id)}" type="button">刪除</button></div></td>`;
     el.rows.appendChild(tr);
   });
 }
@@ -624,7 +628,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=7").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=8").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
