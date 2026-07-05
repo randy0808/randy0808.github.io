@@ -17,9 +17,14 @@ const CRYPTO = {
   doge: ["dogecoin", "DOGE", "Dogecoin"],
   usdt: ["tether", "USDT", "Tether"],
   usdc: ["usd-coin", "USDC", "USD Coin"],
+  pi: ["okx:PI-USDT", "PI", "Pi Network"],
+  "pi network": ["okx:PI-USDT", "PI", "Pi Network"],
+  pinetwork: ["okx:PI-USDT", "PI", "Pi Network"],
+  "okx:pi-usdt": ["okx:PI-USDT", "PI", "Pi Network"],
   link: ["chainlink", "LINK", "Chainlink"],
   ltc: ["litecoin", "LTC", "Litecoin"]
 };
+const OKX_CRYPTO = { "okx:pi-usdt": { instId: "PI-USDT", symbol: "PI", name: "Pi Network" } };
 const KIND = { crypto: "加密貨幣", "us-stock": "美股", "tw-stock": "台股", manual: "手動資產" };
 const ALLOCATION_LIMIT = 20;
 const COLORS = ["#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43", "#4d908e", "#9a6b3f", "#2563eb", "#16a34a", "#dc2626", "#9333ea", "#0891b2", "#ca8a04", "#be123c", "#0f766e", "#7c3aed", "#15803d", "#ea580c", "#0284c7", "#a16207", "#64748b"];
@@ -307,14 +312,23 @@ async function refreshPrices() {
     if (cryptoIds.length) {
       const missingCrypto = [];
       try {
-        const data = await getJson(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoIds.join(",")}&vs_currencies=usd,twd&include_24hr_change=true&include_last_updated_at=true`, true);
-        cryptoIds.forEach((id) => {
-          const x = data[id], base = state.baseCurrency.toLowerCase();
-          if (!x) return missingCrypto.push(id);
-          next[`crypto:${id}`] = { price: Number(x[base] ?? x.usd), currency: x[base] ? state.baseCurrency : "USD", changePercent: Number(x[`${base}_24h_change`] ?? x.usd_24h_change), source: "CoinGecko" };
-          render();
-        });
-      } catch (error) { missingCrypto.push(...cryptoIds); console.warn(error); }
+        const cgIds = cryptoIds.filter((id) => !okxCrypto(id));
+        const okxIds = cryptoIds.filter((id) => okxCrypto(id));
+        if (cgIds.length) {
+          try {
+          const data = await getJson(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds.join(",")}&vs_currencies=usd,twd&include_24hr_change=true&include_last_updated_at=true`, true);
+          cgIds.forEach((id) => {
+            const x = data[id], base = state.baseCurrency.toLowerCase();
+            if (!x) return missingCrypto.push(id);
+            next[`crypto:${id}`] = { price: Number(x[base] ?? x.usd), currency: x[base] ? state.baseCurrency : "USD", changePercent: Number(x[`${base}_24h_change`] ?? x.usd_24h_change), source: "CoinGecko" };
+            render();
+          });
+          } catch (error) { missingCrypto.push(...cgIds); console.warn(error); }
+        }
+        await Promise.all(okxIds.map(async (id) => {
+          try { next[`crypto:${id}`] = await okxQuote(id); render(); } catch (error) { missingCrypto.push(id); console.warn(`OKX quote failed for ${id}`, error); }
+        }));
+      } catch (error) { cryptoIds.forEach((id) => { if (!missingCrypto.includes(id)) missingCrypto.push(id); }); console.warn(error); }
       await mapLimit(missingCrypto, 3, async (id) => {
         const key = `crypto:${id}`;
         const kind = stockKindForSymbol(id);
@@ -340,6 +354,21 @@ async function refreshPrices() {
   } finally {
     state.refreshing = false; el.refresh.disabled = false; render();
   }
+}
+
+function okxCrypto(id) {
+  return OKX_CRYPTO[String(id || "").trim().toLowerCase()] || null;
+}
+
+async function okxQuote(id) {
+  const cfg = okxCrypto(id);
+  if (!cfg) throw new Error("unknown OKX crypto");
+  const data = await getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(cfg.instId)}`, true, 8000);
+  const t = data?.data?.[0];
+  const price = Number(t?.last);
+  if (data?.code !== "0" || !Number.isFinite(price)) throw new Error("OKX ticker missing price");
+  const open = Number(t.open24h);
+  return { price, currency: "USD", changePercent: open > 0 ? (price - open) / open * 100 : null, source: `OKX ${cfg.instId}`, asOf: Number(t.ts) || Date.now() };
 }
 
 async function mapLimit(items, limit, task) {
@@ -637,7 +666,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=15").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=16").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
