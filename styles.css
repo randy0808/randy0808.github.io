@@ -306,7 +306,7 @@ select:focus {
 
 .legend-row {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) minmax(150px, auto);
   align-items: center;
   gap: 8px;
 }
@@ -322,6 +322,23 @@ select:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.legend-values {
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.legend-market-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend-percent {
+  min-width: 3.6em;
+  text-align: right;
 }
 
 .holdings-panel {
