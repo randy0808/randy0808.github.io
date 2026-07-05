@@ -10,7 +10,7 @@
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=16">
+    <link rel="stylesheet" href="styles.css?v=17">
   </head>
   <body>
     <div class="app-shell">
@@ -153,21 +153,6 @@
               <p id="statusMessage">新增資產後會開始追蹤市值與損益。</p>
             </div>
             <div class="holdings-tools">
-              <label class="sort-box">
-                <span>排序</span>
-                <select id="positionSort">
-                  <option value="value-desc">市值 高到低</option>
-                  <option value="value-asc">市值 低到高</option>
-                  <option value="asset-asc">資產 A 到 Z</option>
-                  <option value="asset-desc">資產 Z 到 A</option>
-                  <option value="quantity-desc">數量 多到少</option>
-                  <option value="quantity-asc">數量 少到多</option>
-                  <option value="profit-desc">損益 高到低</option>
-                  <option value="profit-asc">損益 低到高</option>
-                  <option value="profitPercent-desc">損益率 高到低</option>
-                  <option value="profitPercent-asc">損益率 低到高</option>
-                </select>
-              </label>
               <label class="search-box">
                 <span>搜尋</span>
                 <input id="positionSearch" type="search" placeholder="代號或名稱">
@@ -179,12 +164,24 @@
             <table>
               <thead>
                 <tr>
-                  <th>資產</th>
-                  <th>數量</th>
-                  <th>平均成本</th>
-                  <th>現價</th>
-                  <th>市值</th>
-                  <th>損益</th>
+                  <th>
+                    <button class="sort-header" type="button" data-sort-field="asset">資產<span class="sort-indicator" aria-hidden="true"></span></button>
+                  </th>
+                  <th>
+                    <button class="sort-header align-right" type="button" data-sort-field="quantity">數量<span class="sort-indicator" aria-hidden="true"></span></button>
+                  </th>
+                  <th>
+                    <button class="sort-header align-right" type="button" data-sort-field="averageCost">平均成本<span class="sort-indicator" aria-hidden="true"></span></button>
+                  </th>
+                  <th>
+                    <button class="sort-header align-right" type="button" data-sort-field="price">現價<span class="sort-indicator" aria-hidden="true"></span></button>
+                  </th>
+                  <th>
+                    <button class="sort-header align-right" type="button" data-sort-field="value">市值<span class="sort-indicator" aria-hidden="true"></span></button>
+                  </th>
+                  <th>
+                    <button class="sort-header align-right" type="button" data-sort-field="profitPercent">損益<span class="sort-indicator" aria-hidden="true"></span></button>
+                  </th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -200,6 +197,6 @@
       </main>
     </div>
 
-    <script src="app.js?v=18" defer></script>
+    <script src="app.js?v=19" defer></script>
   </body>
 </html>
