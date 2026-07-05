@@ -149,10 +149,27 @@
               <h2>持倉</h2>
               <p id="statusMessage">新增資產後會開始追蹤市值與損益。</p>
             </div>
-            <label class="search-box">
-              <span>搜尋</span>
-              <input id="positionSearch" type="search" placeholder="代號或名稱">
-            </label>
+            <div class="holdings-tools">
+              <label class="sort-box">
+                <span>排序</span>
+                <select id="positionSort">
+                  <option value="value-desc">市值 高到低</option>
+                  <option value="value-asc">市值 低到高</option>
+                  <option value="asset-asc">資產 A 到 Z</option>
+                  <option value="asset-desc">資產 Z 到 A</option>
+                  <option value="quantity-desc">數量 多到少</option>
+                  <option value="quantity-asc">數量 少到多</option>
+                  <option value="profit-desc">損益 高到低</option>
+                  <option value="profit-asc">損益 低到高</option>
+                  <option value="profitPercent-desc">損益率 高到低</option>
+                  <option value="profitPercent-asc">損益率 低到高</option>
+                </select>
+              </label>
+              <label class="search-box">
+                <span>搜尋</span>
+                <input id="positionSearch" type="search" placeholder="代號或名稱">
+              </label>
+            </div>
           </div>
 
           <div class="table-wrap">
