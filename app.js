@@ -21,7 +21,8 @@ const CRYPTO = {
   ltc: ["litecoin", "LTC", "Litecoin"]
 };
 const KIND = { crypto: "加密貨幣", "us-stock": "美股", "tw-stock": "台股", manual: "手動資產" };
-const COLORS = ["#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43", "#4d908e"];
+const ALLOCATION_LIMIT = 20;
+const COLORS = ["#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43", "#4d908e", "#9a6b3f", "#2563eb", "#16a34a", "#dc2626", "#9333ea", "#0891b2", "#ca8a04", "#be123c", "#0f766e", "#7c3aed", "#15803d", "#ea580c", "#0284c7", "#a16207", "#64748b"];
 const GF_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
 const GF_US = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
 const GF_HINTS = { AAPL: "NASDAQ", AMD: "NASDAQ", AMZN: "NASDAQ", COST: "NASDAQ", GOOGL: "NASDAQ", GOOG: "NASDAQ", META: "NASDAQ", MSFT: "NASDAQ", NFLX: "NASDAQ", NVDA: "NASDAQ", QQQ: "NASDAQ", TQQQ: "NASDAQ", TSLA: "NASDAQ", VOO: "NYSEARCA", SPY: "NYSEARCA", IVV: "NYSEARCA", DIA: "NYSEARCA", IWM: "NYSEARCA", AWR: "NYSE", BA: "NYSE", BAC: "NYSE", BABA: "NYSE", BEN: "NYSE", BRK: "NYSE", CCL: "NYSE", DIS: "NYSE", EL: "NYSE", JPM: "NYSE", KO: "NYSE", NKE: "NYSE", TSM: "NYSE", UNH: "NYSE", V: "NYSE", WMT: "NYSE" };
@@ -264,6 +265,7 @@ function drawChart() {
   ctx.clearRect(0, 0, size, size);
   const items = state.positions.map((p) => ({ p, v: metrics(p).value })).filter((x) => Number.isFinite(x.v) && x.v > 0).sort((a, b) => b.v - a.v);
   const total = items.reduce((s, x) => s + x.v, 0);
+  const chartItems = allocationItems(items);
   const cx = size / 2, cy = size / 2, r = 92;
   if (!total) {
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 26; ctx.strokeStyle = "#dfe7df"; ctx.stroke();
@@ -272,14 +274,21 @@ function drawChart() {
     return;
   }
   let start = -Math.PI / 2;
-  items.forEach((item, i) => {
+  chartItems.forEach((item, i) => {
     const angle = item.v / total * Math.PI * 2;
     ctx.beginPath(); ctx.arc(cx, cy, r, start, start + angle); ctx.lineWidth = 26; ctx.lineCap = "round"; ctx.strokeStyle = COLORS[i % COLORS.length]; ctx.stroke();
     start += angle;
   });
   ctx.fillStyle = "#19211e"; ctx.font = "800 20px system-ui"; ctx.textAlign = "center"; ctx.fillText(currency(total, state.baseCurrency, true), cx, cy - 3);
   ctx.fillStyle = "#647067"; ctx.font = "700 12px system-ui"; ctx.fillText(state.baseCurrency, cx, cy + 19);
-  el.legend.innerHTML = items.slice(0, 6).map((x, i) => `<div class="legend-row"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.p.symbol)}</strong><small>${(x.v / total * 100).toFixed(1)}%</small></div>`).join("");
+  el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><small>${(x.v / total * 100).toFixed(1)}%</small></div>`).join("");
+}
+
+function allocationItems(items) {
+  const top = items.slice(0, ALLOCATION_LIMIT).map((x) => ({ label: x.p.symbol, v: x.v }));
+  const other = items.slice(ALLOCATION_LIMIT).reduce((sum, x) => sum + x.v, 0);
+  if (other > 0) top.push({ label: "其他", v: other });
+  return top;
 }
 
 async function refreshPrices() {
@@ -628,7 +637,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=8").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=9").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
