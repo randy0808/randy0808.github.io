@@ -34,17 +34,18 @@ const el = {
   submit: $("submitAssetButton"), cancel: $("cancelEditButton"), export: $("exportButton"),
   import: $("importButton"), importFile: $("importFile"), allocTotal: $("allocationTotal"),
   canvas: $("allocationChart"), legend: $("allocationLegend"), rows: $("positionsBody"),
-  empty: $("emptyState"), status: $("statusMessage"), search: $("positionSearch"),
+  empty: $("emptyState"), status: $("statusMessage"), search: $("positionSearch"), sort: $("positionSort"),
   baseButtons: document.querySelectorAll("[data-base-currency]")
 };
 const state = load();
 
 function load() {
-  const fresh = { positions: [], baseCurrency: "TWD", quotes: {}, fx: { USD: 1, TWD: FALLBACK_TWD }, fxAt: null, refreshing: false, lastSync: null, errors: [] };
+  const fresh = { positions: [], baseCurrency: "TWD", sortMode: "value-desc", quotes: {}, fx: { USD: 1, TWD: FALLBACK_TWD }, fxAt: null, refreshing: false, lastSync: null, errors: [] };
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || "{}");
     if (Array.isArray(saved.positions)) fresh.positions = saved.positions;
     if (saved.baseCurrency === "USD" || saved.baseCurrency === "TWD") fresh.baseCurrency = saved.baseCurrency;
+    if (typeof saved.sortMode === "string") fresh.sortMode = saved.sortMode;
     if (saved.fx?.rates?.TWD) fresh.fx = { USD: 1, TWD: Number(saved.fx.rates.TWD) };
   } catch (error) {
     console.warn("load failed", error);
@@ -56,6 +57,7 @@ function save() {
   localStorage.setItem(STORE, JSON.stringify({
     positions: state.positions,
     baseCurrency: state.baseCurrency,
+    sortMode: state.sortMode,
     fx: { rates: state.fx }
   }));
 }
@@ -175,6 +177,7 @@ function render() {
   el.allocTotal.textContent = currency(t.value);
   el.sync.textContent = state.refreshing ? "正在同步市場價格..." : state.lastSync ? `最近更新 ${time(state.lastSync)}` : "尚未同步市場價格";
   el.status.textContent = !state.positions.length ? "新增資產後會開始追蹤市值與損益。" : state.errors.length ? `${state.errors.length} 個報價暫時無法更新：${state.errors.slice(0, 3).join("、")}` : `已取得 ${t.quoted} 筆報價，刷新間隔 60 秒。`;
+  el.sort.value = state.sortMode;
   el.baseButtons.forEach((b) => b.classList.toggle("is-active", b.dataset.baseCurrency === state.baseCurrency));
   renderRows();
   drawChart();
@@ -182,10 +185,9 @@ function render() {
 
 function renderRows() {
   const query = el.search.value.trim().toLowerCase();
-  const rows = state.positions
+  const rows = sortRows(state.positions
     .map((p) => ({ p, m: metrics(p) }))
-    .filter(({ p }) => !query || `${p.symbol} ${p.name} ${KIND[p.kind]}`.toLowerCase().includes(query))
-    .sort((a, b) => (Number.isFinite(b.m.value) ? b.m.value : -1) - (Number.isFinite(a.m.value) ? a.m.value : -1));
+    .filter(({ p }) => !query || `${p.symbol} ${p.name} ${KIND[p.kind]}`.toLowerCase().includes(query)));
   el.rows.innerHTML = "";
   el.empty.classList.toggle("is-hidden", state.positions.length > 0);
   rows.forEach(({ p, m }) => {
@@ -195,6 +197,34 @@ function renderRows() {
     tr.innerHTML = `<td><div class="asset-cell"><span class="asset-badge">${esc(p.symbol.replace(/\..+$/, "").slice(0, 3))}</span><span class="asset-title"><strong>${esc(p.name)}</strong><small>${esc(p.symbol)} · ${esc(KIND[p.kind])}</small></span></div></td><td>${number(p.quantity)}</td><td>${currency(p.averageCost, m.ccur)}<div class="sub-value">${currency(m.cost)}</div></td><td>${Number.isFinite(qPrice) ? currency(qPrice, m.qcur) : "--"}<div class="sub-value ${Number.isFinite(ch) ? (ch >= 0 ? "profit-positive" : "profit-negative") : ""}">${Number.isFinite(ch) ? percent(ch) : esc(m.q?.source || "等待報價")}</div></td><td>${currency(m.value)}</td><td class="${m.profit >= 0 ? "profit-positive" : "profit-negative"}">${currency(m.profit)}<div>${percent(m.profitPct)}</div></td><td><div class="row-actions"><button class="row-button" data-action="edit" data-id="${esc(p.id)}" type="button">編輯</button><button class="row-button danger" data-action="delete" data-id="${esc(p.id)}" type="button">刪除</button></div></td>`;
     el.rows.appendChild(tr);
   });
+}
+
+function sortRows(rows) {
+  const mode = state.sortMode || "value-desc";
+  const [field, direction = "desc"] = mode.split("-");
+  const dir = direction === "asc" ? 1 : -1;
+  return rows.sort((a, b) => {
+    if (field === "asset") {
+      const left = `${a.p.symbol} ${a.p.name}`.trim();
+      const right = `${b.p.symbol} ${b.p.name}`.trim();
+      return left.localeCompare(right, "en", { numeric: true, sensitivity: "base" }) * dir;
+    }
+    const av = sortValue(a, field);
+    const bv = sortValue(b, field);
+    const aOk = Number.isFinite(av);
+    const bOk = Number.isFinite(bv);
+    if (!aOk && !bOk) return a.p.symbol.localeCompare(b.p.symbol, "en", { numeric: true, sensitivity: "base" });
+    if (!aOk) return 1;
+    if (!bOk) return -1;
+    return direction === "asc" ? av - bv : bv - av;
+  });
+}
+
+function sortValue(row, field) {
+  if (field === "quantity") return Number(row.p.quantity);
+  if (field === "profit") return Number(row.m.profit);
+  if (field === "profitPercent") return Number(row.m.profitPct);
+  return Number(row.m.value);
 }
 
 function drawChart() {
@@ -472,6 +502,7 @@ el.export.addEventListener("click", exportData);
 el.import.addEventListener("click", () => el.importFile.click());
 el.importFile.addEventListener("change", () => importData(el.importFile.files[0]));
 el.search.addEventListener("input", renderRows);
+el.sort.addEventListener("change", () => { state.sortMode = el.sort.value; save(); renderRows(); });
 el.baseButtons.forEach((b) => b.addEventListener("click", () => { state.baseCurrency = b.dataset.baseCurrency; save(); render(); refreshPrices(); }));
 el.rows.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
