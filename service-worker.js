@@ -1,11 +1,11 @@
 "use strict";
 
-const CACHE_NAME = "wealthtrack-v17";
+const CACHE_NAME = "wealthtrack-v18";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=15",
-  "./app.js?v=17",
+  "./styles.css?v=16",
+  "./app.js?v=18",
   "./manifest.webmanifest",
   "./icon.svg"
 ];
