@@ -48,7 +48,7 @@ const el = {
 const state = load();
 
 function load() {
-  const fresh = { positions: [], baseCurrency: "TWD", sortMode: "value-desc", quotes: {}, fx: { USD: 1, TWD: FALLBACK_TWD }, fxAt: null, refreshing: false, lastSync: null, errors: [] };
+  const fresh = { positions: [], baseCurrency: "TWD", sortMode: "value-desc", quotes: {}, fx: { USD: 1, TWD: FALLBACK_TWD }, fxAt: null, refreshing: false, lastSync: null, errors: [], allocationHoverKey: null, allocationPinnedKey: null };
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || "{}");
     if (Array.isArray(saved.positions)) fresh.positions = saved.positions;
@@ -262,7 +262,7 @@ function sortValue(row, field) {
   return Number(row.m.value);
 }
 
-function drawChart() {
+function drawChart(updateLegend = true) {
   const canvas = el.canvas;
   const ctx = canvas.getContext("2d");
   const size = 260, dpr = window.devicePixelRatio || 1;
@@ -276,19 +276,60 @@ function drawChart() {
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 26; ctx.strokeStyle = "#dfe7df"; ctx.stroke();
     ctx.fillStyle = "#647067"; ctx.font = "700 16px system-ui"; ctx.textAlign = "center"; ctx.fillText("No Data", cx, cy + 5);
     renderInsights([], 0);
-    el.legend.innerHTML = "<small>尚無可繪製的市值資料</small>";
+    if (updateLegend) el.legend.innerHTML = "<small>尚無可繪製的市值資料</small>";
     return;
   }
+  const activeKey = activeAllocationKey(chartItems);
   let start = -Math.PI / 2;
-  chartItems.forEach((item, i) => {
+  const segments = chartItems.map((item, i) => {
     const angle = item.v / total * Math.PI * 2;
-    ctx.beginPath(); ctx.arc(cx, cy, r, start, start + angle); ctx.lineWidth = 26; ctx.lineCap = "round"; ctx.strokeStyle = COLORS[i % COLORS.length]; ctx.stroke();
+    const segment = { item, i, start, end: start + angle };
     start += angle;
+    return segment;
   });
+  const draw = (segment, active) => {
+    ctx.beginPath(); ctx.save(); ctx.globalAlpha = activeKey && !active ? 0.44 : 1;
+    ctx.arc(cx, cy, active ? r + 9 : r, segment.start, segment.end);
+    ctx.lineWidth = active ? 35 : 26; ctx.lineCap = "round"; ctx.strokeStyle = COLORS[segment.i % COLORS.length];
+    if (active) { ctx.shadowColor = "rgba(11, 122, 117, 0.34)"; ctx.shadowBlur = 12; }
+    ctx.stroke(); ctx.restore();
+  };
+  segments.filter((segment) => segment.item.key !== activeKey).forEach((segment) => draw(segment, false));
+  const activeSegment = segments.find((segment) => segment.item.key === activeKey);
+  if (activeSegment) draw(activeSegment, true);
   ctx.fillStyle = "#19211e"; ctx.font = "800 20px system-ui"; ctx.textAlign = "center"; ctx.fillText(currency(total, state.baseCurrency, true), cx, cy - 3);
   ctx.fillStyle = "#647067"; ctx.font = "700 12px system-ui"; ctx.fillText(state.baseCurrency, cx, cy + 19);
   renderInsights(items, total);
-  el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><span class="legend-market-value">${currency(x.v)}</span><span class="legend-percent">${(x.v / total * 100).toFixed(1)}%</span></div>`).join("");
+  if (updateLegend) {
+    el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row${x.key === activeKey ? " is-active" : ""}" data-allocation-key="${esc(x.key)}" role="button" tabindex="0" aria-pressed="${x.key === state.allocationPinnedKey}"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><span class="legend-market-value">${currency(x.v)}</span><span class="legend-percent">${(x.v / total * 100).toFixed(1)}%</span></div>`).join("");
+  } else {
+    updateLegendActive(activeKey);
+  }
+}
+
+function activeAllocationKey(items) {
+  const key = state.allocationHoverKey || state.allocationPinnedKey;
+  return key && items.some((x) => x.key === key) ? key : null;
+}
+
+function setAllocationHover(key) {
+  if (state.allocationHoverKey === key) return;
+  state.allocationHoverKey = key;
+  drawChart(false);
+}
+
+function toggleAllocationPin(key) {
+  state.allocationPinnedKey = state.allocationPinnedKey === key ? null : key;
+  drawChart(false);
+}
+
+function updateLegendActive(activeKey) {
+  el.legend.querySelectorAll(".legend-row[data-allocation-key]").forEach((row) => {
+    const active = row.dataset.allocationKey === activeKey;
+    const pinned = row.dataset.allocationKey === state.allocationPinnedKey;
+    row.classList.toggle("is-active", active);
+    row.setAttribute("aria-pressed", String(pinned));
+  });
 }
 
 function renderInsights(items, total) {
@@ -314,9 +355,9 @@ function renderInsights(items, total) {
 }
 
 function allocationItems(items) {
-  const top = items.slice(0, ALLOCATION_LIMIT).map((x) => ({ label: x.p.symbol, v: x.v }));
+  const top = items.slice(0, ALLOCATION_LIMIT).map((x) => ({ key: `position:${x.p.id || x.p.symbol}`, label: x.p.symbol, v: x.v }));
   const other = items.slice(ALLOCATION_LIMIT).reduce((sum, x) => sum + x.v, 0);
-  if (other > 0) top.push({ label: "其他", v: other });
+  if (other > 0) top.push({ key: "other", label: "其他", v: other });
   return top;
 }
 
@@ -686,11 +727,32 @@ el.rows.addEventListener("click", (event) => {
   if (button.dataset.action === "edit") edit(button.dataset.id);
   if (button.dataset.action === "delete") remove(button.dataset.id);
 });
+el.legend.addEventListener("pointerover", (event) => {
+  const row = event.target.closest(".legend-row[data-allocation-key]");
+  if (row) setAllocationHover(row.dataset.allocationKey);
+});
+el.legend.addEventListener("pointerleave", () => setAllocationHover(null));
+el.legend.addEventListener("click", (event) => {
+  const row = event.target.closest(".legend-row[data-allocation-key]");
+  if (row) toggleAllocationPin(row.dataset.allocationKey);
+});
+el.legend.addEventListener("focusin", (event) => {
+  const row = event.target.closest(".legend-row[data-allocation-key]");
+  if (row) setAllocationHover(row.dataset.allocationKey);
+});
+el.legend.addEventListener("focusout", () => setAllocationHover(null));
+el.legend.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest(".legend-row[data-allocation-key]");
+  if (!row) return;
+  event.preventDefault();
+  toggleAllocationPin(row.dataset.allocationKey);
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=17").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=18").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
