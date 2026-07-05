@@ -333,6 +333,18 @@ select:focus {
   align-items: flex-start;
 }
 
+.holdings-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sort-box {
+  width: min(190px, 100%);
+}
+
 .search-box {
   width: min(260px, 100%);
 }
@@ -475,6 +487,12 @@ th {
 
   .segmented,
   .header-actions .button {
+    width: 100%;
+  }
+
+  .holdings-tools,
+  .sort-box,
+  .search-box {
     width: 100%;
   }
 
