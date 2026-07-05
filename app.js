@@ -20,9 +20,9 @@ const CRYPTO = {
 };
 const KIND = { crypto: "加密貨幣", "us-stock": "美股", "tw-stock": "台股", manual: "手動資產" };
 const COLORS = ["#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43", "#4d908e"];
-const GF_BASE = "https://r.jina.ai/http://r.jina.ai/http://https://www.google.com/finance/quote/";
+const GF_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
 const GF_US = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
-const GF_HINTS = { AAPL: "NASDAQ", AMD: "NASDAQ", AMZN: "NASDAQ", GOOGL: "NASDAQ", GOOG: "NASDAQ", META: "NASDAQ", MSFT: "NASDAQ", NFLX: "NASDAQ", NVDA: "NASDAQ", QQQ: "NASDAQ", TQQQ: "NASDAQ", TSLA: "NASDAQ", VOO: "NYSEARCA", SPY: "NYSEARCA", IVV: "NYSEARCA", DIA: "NYSEARCA", IWM: "NYSEARCA", BABA: "NYSE", BRK: "NYSE", DIS: "NYSE", JPM: "NYSE", KO: "NYSE", NKE: "NYSE", TSM: "NYSE", UNH: "NYSE", V: "NYSE", WMT: "NYSE" };
+const GF_HINTS = { AAPL: "NASDAQ", AMD: "NASDAQ", AMZN: "NASDAQ", COST: "NASDAQ", GOOGL: "NASDAQ", GOOG: "NASDAQ", META: "NASDAQ", MSFT: "NASDAQ", NFLX: "NASDAQ", NVDA: "NASDAQ", QQQ: "NASDAQ", TQQQ: "NASDAQ", TSLA: "NASDAQ", VOO: "NYSEARCA", SPY: "NYSEARCA", IVV: "NYSEARCA", DIA: "NYSEARCA", IWM: "NYSEARCA", AWR: "NYSE", BA: "NYSE", BAC: "NYSE", BABA: "NYSE", BEN: "NYSE", BRK: "NYSE", CCL: "NYSE", DIS: "NYSE", EL: "NYSE", JPM: "NYSE", KO: "NYSE", NKE: "NYSE", TSM: "NYSE", UNH: "NYSE", V: "NYSE", WMT: "NYSE" };
 const $ = (id) => document.getElementById(id);
 const el = {
   sync: $("syncStatus"), total: $("totalValue"), cost: $("totalCost"), profit: $("totalProfit"),
@@ -104,6 +104,14 @@ function keyOf(p) {
   if (p.kind === "crypto") return `crypto:${p.marketSymbol}`;
   if (p.kind === "manual") return `manual:${p.id}`;
   return `stock:${p.marketSymbol}`;
+}
+
+function stockKindForSymbol(symbol) {
+  const raw = String(symbol || "").trim().toUpperCase().replace(/\s+/g, "");
+  if (!raw || CRYPTO[raw.toLowerCase()]) return null;
+  if (/^\d{4,6}(\.(TW|TWO))?$/.test(raw)) return "tw-stock";
+  if (GF_HINTS[raw.replace(".B", "")] || /^[A-Z.]{1,5}$/.test(raw)) return "us-stock";
+  return null;
 }
 
 function quoteOf(p) {
@@ -266,14 +274,25 @@ async function refreshPrices() {
       return map;
     }, new Map())];
     if (cryptoIds.length) {
+      const missingCrypto = [];
       try {
         const data = await getJson(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoIds.join(",")}&vs_currencies=usd,twd&include_24hr_change=true&include_last_updated_at=true`, true);
         cryptoIds.forEach((id) => {
           const x = data[id], base = state.baseCurrency.toLowerCase();
-          if (!x) return state.errors.push(id);
+          if (!x) return missingCrypto.push(id);
           next[`crypto:${id}`] = { price: Number(x[base] ?? x.usd), currency: x[base] ? state.baseCurrency : "USD", changePercent: Number(x[`${base}_24h_change`] ?? x.usd_24h_change), source: "CoinGecko" };
         });
-      } catch (error) { state.errors.push("加密貨幣"); console.warn(error); }
+      } catch (error) { missingCrypto.push(...cryptoIds); console.warn(error); }
+      await Promise.all(missingCrypto.map(async (id) => {
+        const kind = stockKindForSymbol(id);
+        if (!kind) return state.errors.push(id);
+        try {
+          next[`crypto:${id}`] = await stockQuote(id.toUpperCase(), kind);
+        } catch (error) {
+          state.errors.push(id);
+          console.warn(`Stock fallback failed for ${id}`, error);
+        }
+      }));
     }
     await Promise.all(stocks.map(async ([symbol, kind]) => {
       try { next[`stock:${symbol}`] = await stockQuote(symbol, kind); } catch (error) { state.errors.push(symbol); console.warn(error); }
@@ -375,7 +394,7 @@ function money(value) {
 async function twse(symbol) {
   const clean = String(symbol || "").trim().toUpperCase().replace(/\.(TW|TWO)$/i, "");
   const exchange = String(symbol || "").toUpperCase().endsWith(".TWO") ? "otc" : "tse";
-  const data = await getJson(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exchange}_${clean}.tw&json=1&delay=0`, false, 5000);
+  const data = await getJson(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exchange}_${clean}.tw&json=1&delay=0`, true, 5000);
   const item = data?.msgArray?.[0];
   if (!item) throw new Error("no TWSE quote");
   const price = firstNumber(item.z, item.pz, item.y);
@@ -394,7 +413,7 @@ function firstNumber(...values) {
 
 async function yahoo(symbol) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m`;
-  const data = await getJson(url, false, 5000);
+  const data = await getJson(url, true, 5000);
   const meta = data?.chart?.result?.[0]?.meta;
   if (!meta) throw new Error("no quote");
   const price = Number(meta.regularMarketPrice ?? meta.previousClose ?? meta.chartPreviousClose);
