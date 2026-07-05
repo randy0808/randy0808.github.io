@@ -155,6 +155,11 @@ function percent(value) {
   return Number.isFinite(value) ? `${value > 0 ? "+" : ""}${value.toFixed(2)}%` : "--";
 }
 
+function valueClass(value) {
+  if (!Number.isFinite(value) || value === 0) return "";
+  return value > 0 ? "profit-positive" : "profit-negative";
+}
+
 function metrics(p) {
   const q = quoteOf(p);
   const qcur = q?.currency || p.manualCurrency || state.baseCurrency;
@@ -179,16 +184,18 @@ function render() {
   const t = portfolio();
   const profit = t.value - t.cost;
   el.total.textContent = currency(t.value);
+  el.total.className = valueClass(t.value);
   el.cost.textContent = currency(t.cost);
   el.profit.textContent = currency(profit);
-  el.profit.className = profit >= 0 ? "profit-positive" : "profit-negative";
+  el.profit.className = valueClass(profit);
   el.profitPct.textContent = percent(t.cost > 0 ? profit / t.cost * 100 : NaN);
-  el.profitPct.className = el.profit.className;
+  el.profitPct.className = valueClass(t.cost > 0 ? profit / t.cost * 100 : NaN);
   el.count.textContent = `${state.positions.length} 筆資產`;
   el.baseHint.textContent = `以 ${state.baseCurrency} 顯示`;
   el.quoteHealth.textContent = `${t.quoted}/${state.positions.length}`;
   el.fxStatus.textContent = state.fxAt ? `匯率 ${time(state.fxAt)}` : "使用備用匯率";
   el.allocTotal.textContent = currency(t.value);
+  el.allocTotal.className = valueClass(t.value);
   el.sync.textContent = state.refreshing ? "正在同步市場價格..." : state.lastSync ? `最近更新 ${time(state.lastSync)}` : "尚未同步市場價格";
   el.status.textContent = !state.positions.length ? "新增資產後會開始追蹤市值與損益。" : state.errors.length ? `${state.errors.length} 個報價暫時無法更新${t.quoted ? "，已保留可用的上次報價" : ""}：${state.errors.slice(0, 3).join("、")}` : `已取得 ${t.quoted} 筆報價，自動刷新間隔 ${Math.round(REFRESH_MS / 60000)} 分鐘。`;
   el.sort.value = state.sortMode;
@@ -207,8 +214,12 @@ function renderRows() {
   rows.forEach(({ p, m }) => {
     const qPrice = Number(m.q?.price);
     const ch = Number(m.q?.changePercent);
+    const qPriceClass = valueClass(qPrice);
+    const chClass = valueClass(ch);
+    const valueCellClass = valueClass(m.value);
+    const profitClass = valueClass(m.profit);
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><div class="asset-cell"><span class="asset-badge">${esc(p.symbol.replace(/\..+$/, "").slice(0, 3))}</span><span class="asset-title"><strong>${esc(p.name)}</strong><small>${esc(p.symbol)} · ${esc(KIND[p.kind])}</small></span></div></td><td>${number(p.quantity)}</td><td>${currency(p.averageCost, m.ccur)}<div class="sub-value">${currency(m.cost)}</div></td><td>${Number.isFinite(qPrice) ? currency(qPrice, m.qcur) : "--"}<div class="sub-value ${Number.isFinite(ch) ? (ch >= 0 ? "profit-positive" : "profit-negative") : ""}">${Number.isFinite(ch) ? percent(ch) : esc(m.q?.source || "等待報價")}</div></td><td>${currency(m.value)}</td><td class="${m.profit >= 0 ? "profit-positive" : "profit-negative"}">${currency(m.profit)}<div>${percent(m.profitPct)}</div></td><td><div class="row-actions"><button class="row-button" data-action="edit" data-id="${esc(p.id)}" type="button">編輯</button><button class="row-button danger" data-action="delete" data-id="${esc(p.id)}" type="button">刪除</button></div></td>`;
+    tr.innerHTML = `<td><div class="asset-cell"><span class="asset-badge">${esc(p.symbol.replace(/\..+$/, "").slice(0, 3))}</span><span class="asset-title"><strong>${esc(p.name)}</strong><small>${esc(p.symbol)} · ${esc(KIND[p.kind])}</small></span></div></td><td>${number(p.quantity)}</td><td>${currency(p.averageCost, m.ccur)}<div class="sub-value">${currency(m.cost)}</div></td><td class="${qPriceClass}">${Number.isFinite(qPrice) ? currency(qPrice, m.qcur) : "--"}<div class="sub-value ${chClass}">${Number.isFinite(ch) ? percent(ch) : esc(m.q?.source || "等待報價")}</div></td><td class="${valueCellClass}">${currency(m.value)}</td><td class="${profitClass}">${currency(m.profit)}<div>${percent(m.profitPct)}</div></td><td><div class="row-actions"><button class="row-button" data-action="edit" data-id="${esc(p.id)}" type="button">編輯</button><button class="row-button danger" data-action="delete" data-id="${esc(p.id)}" type="button">刪除</button></div></td>`;
     el.rows.appendChild(tr);
   });
 }
@@ -613,7 +624,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=6").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=7").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
