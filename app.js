@@ -637,7 +637,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=9").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=10").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
