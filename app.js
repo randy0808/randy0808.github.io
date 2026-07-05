@@ -1,7 +1,9 @@
 "use strict";
 
 const STORE = "wealthtrack.v1";
-const REFRESH_MS = 60000;
+const REFRESH_MS = 300000;
+const STOCK_QUOTE_CONCURRENCY = 1;
+const STOCK_QUOTE_DELAY_MS = 1800;
 const FALLBACK_TWD = 31.2;
 const CRYPTO = {
   btc: ["bitcoin", "BTC", "Bitcoin"],
@@ -46,6 +48,9 @@ function load() {
     if (Array.isArray(saved.positions)) fresh.positions = saved.positions;
     if (saved.baseCurrency === "USD" || saved.baseCurrency === "TWD") fresh.baseCurrency = saved.baseCurrency;
     if (typeof saved.sortMode === "string") fresh.sortMode = saved.sortMode;
+    if (saved.quotes && typeof saved.quotes === "object") {
+      fresh.quotes = Object.fromEntries(Object.entries(saved.quotes).filter(([, q]) => q && Number.isFinite(Number(q.price)) && typeof q.currency === "string"));
+    }
     if (saved.fx?.rates?.TWD) fresh.fx = { USD: 1, TWD: Number(saved.fx.rates.TWD) };
   } catch (error) {
     console.warn("load failed", error);
@@ -58,6 +63,7 @@ function save() {
     positions: state.positions,
     baseCurrency: state.baseCurrency,
     sortMode: state.sortMode,
+    quotes: state.quotes,
     fx: { rates: state.fx }
   }));
 }
@@ -184,7 +190,7 @@ function render() {
   el.fxStatus.textContent = state.fxAt ? `匯率 ${time(state.fxAt)}` : "使用備用匯率";
   el.allocTotal.textContent = currency(t.value);
   el.sync.textContent = state.refreshing ? "正在同步市場價格..." : state.lastSync ? `最近更新 ${time(state.lastSync)}` : "尚未同步市場價格";
-  el.status.textContent = !state.positions.length ? "新增資產後會開始追蹤市值與損益。" : state.errors.length ? `${state.errors.length} 個報價暫時無法更新：${state.errors.slice(0, 3).join("、")}` : `已取得 ${t.quoted} 筆報價，刷新間隔 60 秒。`;
+  el.status.textContent = !state.positions.length ? "新增資產後會開始追蹤市值與損益。" : state.errors.length ? `${state.errors.length} 個報價暫時無法更新${t.quoted ? "，已保留可用的上次報價" : ""}：${state.errors.slice(0, 3).join("、")}` : `已取得 ${t.quoted} 筆報價，自動刷新間隔 ${Math.round(REFRESH_MS / 60000)} 分鐘。`;
   el.sort.value = state.sortMode;
   el.baseButtons.forEach((b) => b.classList.toggle("is-active", b.dataset.baseCurrency === state.baseCurrency));
   renderRows();
@@ -266,7 +272,7 @@ async function refreshPrices() {
   state.refreshing = true; state.errors = []; el.refresh.disabled = true; render();
   try {
     await fetchFx();
-    const next = {};
+    const next = { ...state.quotes };
     state.quotes = next;
     const cryptoIds = [...new Set(state.positions.filter((p) => p.kind === "crypto").map((p) => p.marketSymbol))];
     const stocks = [...state.positions.filter((p) => p.kind === "us-stock" || p.kind === "tw-stock").reduce((map, p) => {
@@ -286,19 +292,25 @@ async function refreshPrices() {
         });
       } catch (error) { missingCrypto.push(...cryptoIds); console.warn(error); }
       await mapLimit(missingCrypto, 3, async (id) => {
+        const key = `crypto:${id}`;
         const kind = stockKindForSymbol(id);
-        if (!kind) return state.errors.push(id);
+        if (!kind) {
+          if (!next[key]) state.errors.push(id);
+          return;
+        }
         try {
-          next[`crypto:${id}`] = await stockQuote(id.toUpperCase(), kind);
+          next[key] = await stockQuote(id.toUpperCase(), kind);
           render();
         } catch (error) {
-          state.errors.push(id);
+          if (!next[key]) state.errors.push(id);
           console.warn(`Stock fallback failed for ${id}`, error);
         }
       });
     }
-    await mapLimit(stocks, 4, async ([symbol, kind]) => {
-      try { next[`stock:${symbol}`] = await stockQuote(symbol, kind); render(); } catch (error) { state.errors.push(symbol); console.warn(error); render(); }
+    await mapLimit(prioritizeMissing(stocks, next), STOCK_QUOTE_CONCURRENCY, async ([symbol, kind], index) => {
+      const key = `stock:${symbol}`;
+      if (index > 0) await sleep(STOCK_QUOTE_DELAY_MS);
+      try { next[key] = await retry(() => stockQuote(symbol, kind), 2, STOCK_QUOTE_DELAY_MS); render(); } catch (error) { if (!next[key]) state.errors.push(symbol); console.warn(error); render(); }
     });
     state.quotes = next; state.lastSync = Date.now(); save();
   } finally {
@@ -310,11 +322,36 @@ async function mapLimit(items, limit, task) {
   let index = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (index < items.length) {
-      const item = items[index++];
-      await task(item);
+      const taskIndex = index++;
+      await task(items[taskIndex], taskIndex);
     }
   });
   await Promise.all(workers);
+}
+
+function prioritizeMissing(items, quotes) {
+  return shuffle(items).sort(([a], [b]) => Number(Boolean(quotes[`stock:${a}`])) - Number(Boolean(quotes[`stock:${b}`])));
+}
+
+function shuffle(items) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swap]] = [copy[swap], copy[index]];
+  }
+  return copy;
+}
+
+async function retry(task, attempts = 2, delay = 1000) {
+  let last = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { return await task(); } catch (error) { last = error; if (attempt < attempts - 1) await sleep(delay * (attempt + 1)); }
+  }
+  throw last;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchFx() {
@@ -330,13 +367,13 @@ async function fetchFx() {
 }
 
 async function stockQuote(symbol, kind) {
+  if (kind === "tw-stock") {
+    try { return await twse(symbol); } catch (error) { console.warn(`TWSE quote failed for ${symbol}`, error); }
+  }
   try {
     return await yahoo(symbol, kind);
   } catch (error) {
     console.warn(`Yahoo quote failed for ${symbol}`, error);
-  }
-  if (kind === "tw-stock") {
-    try { return await twse(symbol); } catch (error) { console.warn(`TWSE quote failed for ${symbol}`, error); }
   }
   return googleFinance(symbol, kind);
 }
@@ -576,7 +613,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=5").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=6").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
