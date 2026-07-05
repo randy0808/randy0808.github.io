@@ -281,7 +281,7 @@ function drawChart() {
   });
   ctx.fillStyle = "#19211e"; ctx.font = "800 20px system-ui"; ctx.textAlign = "center"; ctx.fillText(currency(total, state.baseCurrency, true), cx, cy - 3);
   ctx.fillStyle = "#647067"; ctx.font = "700 12px system-ui"; ctx.fillText(state.baseCurrency, cx, cy + 19);
-  el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><small>${(x.v / total * 100).toFixed(1)}%</small></div>`).join("");
+  el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><small class="legend-values"><span class="legend-market-value">${currency(x.v)}</span><span class="legend-percent">${(x.v / total * 100).toFixed(1)}%</span></small></div>`).join("");
 }
 
 function allocationItems(items) {
@@ -637,7 +637,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=10").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=11").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
