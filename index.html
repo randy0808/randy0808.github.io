@@ -10,7 +10,7 @@
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=14">
+    <link rel="stylesheet" href="styles.css?v=15">
   </head>
   <body>
     <div class="app-shell">
@@ -137,7 +137,10 @@
               <span id="allocationTotal">--</span>
             </div>
             <div class="chart-wrap">
-              <canvas id="allocationChart" width="260" height="260" aria-label="資產配置圖"></canvas>
+              <div class="chart-main">
+                <canvas id="allocationChart" width="260" height="260" aria-label="資產配置圖"></canvas>
+                <div id="allocationInsights" class="allocation-insights" aria-label="配置洞察"></div>
+              </div>
               <div id="allocationLegend" class="legend"></div>
             </div>
           </section>
@@ -197,6 +200,6 @@
       </main>
     </div>
 
-    <script src="app.js?v=16" defer></script>
+    <script src="app.js?v=17" defer></script>
   </body>
 </html>
