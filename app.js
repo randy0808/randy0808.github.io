@@ -41,7 +41,7 @@ const el = {
   costCurrency: $("costCurrency"), manualPrice: $("manualPrice"), manualCurrency: $("manualCurrency"),
   submit: $("submitAssetButton"), cancel: $("cancelEditButton"), export: $("exportButton"),
   import: $("importButton"), importFile: $("importFile"), allocTotal: $("allocationTotal"),
-  canvas: $("allocationChart"), legend: $("allocationLegend"), rows: $("positionsBody"),
+  canvas: $("allocationChart"), insights: $("allocationInsights"), legend: $("allocationLegend"), rows: $("positionsBody"),
   empty: $("emptyState"), status: $("statusMessage"), search: $("positionSearch"), sort: $("positionSort"),
   baseButtons: document.querySelectorAll("[data-base-currency]")
 };
@@ -275,6 +275,7 @@ function drawChart() {
   if (!total) {
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 26; ctx.strokeStyle = "#dfe7df"; ctx.stroke();
     ctx.fillStyle = "#647067"; ctx.font = "700 16px system-ui"; ctx.textAlign = "center"; ctx.fillText("No Data", cx, cy + 5);
+    renderInsights([], 0);
     el.legend.innerHTML = "<small>尚無可繪製的市值資料</small>";
     return;
   }
@@ -286,7 +287,30 @@ function drawChart() {
   });
   ctx.fillStyle = "#19211e"; ctx.font = "800 20px system-ui"; ctx.textAlign = "center"; ctx.fillText(currency(total, state.baseCurrency, true), cx, cy - 3);
   ctx.fillStyle = "#647067"; ctx.font = "700 12px system-ui"; ctx.fillText(state.baseCurrency, cx, cy + 19);
+  renderInsights(items, total);
   el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><span class="legend-market-value">${currency(x.v)}</span><span class="legend-percent">${(x.v / total * 100).toFixed(1)}%</span></div>`).join("");
+}
+
+function renderInsights(items, total) {
+  if (!el.insights) return;
+  if (!total) {
+    el.insights.innerHTML = `<div class="insight-row"><span class="insight-label">配置洞察</span><span class="insight-value">--</span></div>`;
+    return;
+  }
+  const largest = items[0];
+  const largestPct = largest.v / total * 100;
+  const top3Pct = items.slice(0, 3).reduce((sum, x) => sum + x.v, 0) / total * 100;
+  const kinds = items.reduce((map, x) => {
+    const label = KIND[x.p.kind] || "其他";
+    map.set(label, (map.get(label) || 0) + x.v);
+    return map;
+  }, new Map());
+  const kindRows = [...kinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([label, value], i) => {
+    const pct = value / total * 100;
+    const color = COLORS[(i + 3) % COLORS.length];
+    return `<div class="mix-bar"><span class="mix-bar-label">${esc(label)}</span><span class="mix-bar-track"><span class="mix-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></span></span><span class="mix-bar-percent">${pct.toFixed(1)}%</span></div>`;
+  }).join("");
+  el.insights.innerHTML = `<div class="insight-row"><span class="insight-label">最大部位 ${esc(largest.p.symbol)}</span><span class="insight-value">${largestPct.toFixed(1)}%</span></div><div class="insight-row"><span class="insight-label">前三大集中</span><span class="insight-value">${top3Pct.toFixed(1)}%</span></div><div class="insight-row"><span class="insight-label">可計價部位</span><span class="insight-value">${items.length}/${state.positions.length}</span></div><div class="insight-row"><span class="insight-label">${esc(largest.p.symbol)} 市值</span><span class="insight-value">${currency(largest.v, state.baseCurrency, true)}</span></div><div class="mix-bars">${kindRows}</div>`;
 }
 
 function allocationItems(items) {
@@ -666,7 +690,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=16").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=17").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
