@@ -180,6 +180,7 @@ h2 {
 
 .workspace-grid {
   grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+  align-items: start;
   margin-bottom: 14px;
 }
 
@@ -284,14 +285,26 @@ select:focus {
 }
 
 .allocation-panel {
+  align-self: start;
+  max-height: min(720px, calc(100vh - 130px));
   min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .chart-wrap {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: minmax(170px, 190px) minmax(0, 1fr);
+  align-items: start;
   gap: 16px;
+  min-height: 0;
+}
+
+.chart-main {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
 }
 
 #allocationChart {
@@ -302,6 +315,12 @@ select:focus {
 .legend {
   display: grid;
   gap: 10px;
+  max-height: min(520px, calc(100vh - 280px));
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  align-content: start;
 }
 
 .legend-row {
@@ -356,6 +375,80 @@ select:focus {
   font-weight: 700;
   white-space: nowrap;
   font-size: 0.95rem;
+}
+
+.allocation-insights {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.insight-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.insight-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.insight-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.insight-value {
+  color: var(--text);
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.mix-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.mix-bar {
+  display: grid;
+  grid-template-columns: 3.8em minmax(0, 1fr) 3.5em;
+  align-items: center;
+  gap: 8px;
+}
+
+.mix-bar-label,
+.mix-bar-percent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 760;
+}
+
+.mix-bar-percent {
+  text-align: right;
+}
+
+.mix-bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-soft);
+}
+
+.mix-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
 }
 
 .holdings-panel {
@@ -544,7 +637,16 @@ th {
     justify-items: center;
   }
 
+  .allocation-panel {
+    max-height: none;
+  }
+
+  .chart-main {
+    width: min(100%, 360px);
+  }
+
   .legend {
     width: 100%;
+    max-height: 420px;
   }
 }
