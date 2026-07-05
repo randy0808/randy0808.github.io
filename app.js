@@ -27,6 +27,7 @@ const CRYPTO = {
 const OKX_CRYPTO = { "okx:pi-usdt": { instId: "PI-USDT", symbol: "PI", name: "Pi Network" } };
 const KIND = { crypto: "加密貨幣", "us-stock": "美股", "tw-stock": "台股", manual: "手動資產" };
 const ALLOCATION_LIMIT = 20;
+const SORT_DEFAULT = { asset: "asc", quantity: "desc", averageCost: "desc", price: "desc", value: "desc", profit: "desc", profitPercent: "desc" };
 const COLORS = ["#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43", "#4d908e", "#9a6b3f", "#2563eb", "#16a34a", "#dc2626", "#9333ea", "#0891b2", "#ca8a04", "#be123c", "#0f766e", "#7c3aed", "#15803d", "#ea580c", "#0284c7", "#a16207", "#64748b"];
 const GF_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
 const GF_US = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
@@ -42,7 +43,7 @@ const el = {
   submit: $("submitAssetButton"), cancel: $("cancelEditButton"), export: $("exportButton"),
   import: $("importButton"), importFile: $("importFile"), allocTotal: $("allocationTotal"),
   canvas: $("allocationChart"), insights: $("allocationInsights"), legend: $("allocationLegend"), rows: $("positionsBody"),
-  empty: $("emptyState"), status: $("statusMessage"), search: $("positionSearch"), sort: $("positionSort"),
+  empty: $("emptyState"), status: $("statusMessage"), search: $("positionSearch"), sortButtons: document.querySelectorAll("[data-sort-field]"),
   baseButtons: document.querySelectorAll("[data-base-currency]")
 };
 const state = load();
@@ -205,9 +206,9 @@ function render() {
   el.allocTotal.className = valueClass(t.value);
   el.sync.textContent = state.refreshing ? "正在同步市場價格..." : state.lastSync ? `最近更新 ${time(state.lastSync)}` : "尚未同步市場價格";
   el.status.textContent = !state.positions.length ? "新增資產後會開始追蹤市值與損益。" : state.errors.length ? `${state.errors.length} 個報價暫時無法更新${t.quoted ? "，已保留可用的上次報價" : ""}：${state.errors.slice(0, 3).join("、")}` : `已取得 ${t.quoted} 筆報價，自動刷新間隔 ${Math.round(REFRESH_MS / 60000)} 分鐘。`;
-  el.sort.value = state.sortMode;
   el.baseButtons.forEach((b) => b.classList.toggle("is-active", b.dataset.baseCurrency === state.baseCurrency));
   renderRows();
+  updateSortButtons();
   drawChart();
 }
 
@@ -257,9 +258,34 @@ function sortRows(rows) {
 
 function sortValue(row, field) {
   if (field === "quantity") return Number(row.p.quantity);
+  if (field === "averageCost") return convert(Number(row.p.averageCost), row.m.ccur, state.baseCurrency);
+  if (field === "price") return convert(Number(row.m.q?.price), row.m.qcur, state.baseCurrency);
   if (field === "profit") return Number(row.m.profit);
   if (field === "profitPercent") return Number(row.m.profitPct);
   return Number(row.m.value);
+}
+
+function parseSort() {
+  const [field = "value", rawDirection] = String(state.sortMode || "").split("-");
+  return { field, direction: rawDirection === "asc" ? "asc" : "desc" };
+}
+
+function setSort(field) {
+  const current = parseSort();
+  const direction = current.field === field ? (current.direction === "asc" ? "desc" : "asc") : (SORT_DEFAULT[field] || "desc");
+  state.sortMode = `${field}-${direction}`;
+  save(); renderRows(); updateSortButtons();
+}
+
+function updateSortButtons() {
+  const { field, direction } = parseSort();
+  el.sortButtons.forEach((button) => {
+    const active = button.dataset.sortField === field;
+    const label = button.textContent.trim().replace(/[↕↑↓]/g, "");
+    button.classList.toggle("is-active", active);
+    button.dataset.sortDirection = active ? direction : "";
+    button.setAttribute("aria-label", `${label}排序，${active ? (direction === "asc" ? "目前低到高" : "目前高到低") : "未排序"}`);
+  });
 }
 
 function drawChart(updateLegend = true) {
@@ -719,7 +745,7 @@ el.export.addEventListener("click", exportData);
 el.import.addEventListener("click", () => el.importFile.click());
 el.importFile.addEventListener("change", () => importData(el.importFile.files[0]));
 el.search.addEventListener("input", renderRows);
-el.sort.addEventListener("change", () => { state.sortMode = el.sort.value; save(); renderRows(); });
+el.sortButtons.forEach((button) => button.addEventListener("click", () => setSort(button.dataset.sortField)));
 el.baseButtons.forEach((b) => b.addEventListener("click", () => { state.baseCurrency = b.dataset.baseCurrency; save(); render(); refreshPrices(); }));
 el.rows.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
@@ -752,7 +778,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=18").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=19").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
