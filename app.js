@@ -1,7 +1,7 @@
 "use strict";
 
 const STORE = "wealthtrack.v1";
-const REFRESH_MS = 300000;
+const REFRESH_MS = 60000;
 const STOCK_QUOTE_CONCURRENCY = 1;
 const STOCK_QUOTE_DELAY_MS = 1800;
 const FALLBACK_TWD = 31.2;
@@ -637,7 +637,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
 });
 window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=14").catch(console.warn);
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=15").catch(console.warn);
 updateKind();
 render();
 if (state.positions.length) refreshPrices();
