@@ -306,7 +306,7 @@ select:focus {
 
 .legend-row {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) minmax(150px, auto);
+  grid-template-columns: 12px minmax(6.5rem, 1fr) minmax(0, 12.5rem);
   align-items: center;
   gap: 8px;
 }
@@ -325,19 +325,22 @@ select:focus {
 }
 
 .legend-values {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.2em;
   justify-content: flex-end;
   align-items: baseline;
   gap: 10px;
+  min-width: 0;
+  width: 100%;
 }
 
 .legend-market-value {
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: right;
 }
 
 .legend-percent {
-  min-width: 3.6em;
   text-align: right;
 }
 
