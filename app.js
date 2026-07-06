@@ -1,165 +1,433 @@
 "use strict";
 
-const STORE = "wealthtrack.v1";
-const REFRESH_MS = 60000;
+const STORAGE_KEY = "wealthtrack.v1";
+const FALLBACK_USD_TWD = 31.2;
+const REFRESH_MS = 60_000;
+const AUTO_SYNC_DEBOUNCE_MS = 2_500;
 const STOCK_QUOTE_CONCURRENCY = 1;
-const STOCK_QUOTE_DELAY_MS = 1800;
-const FALLBACK_TWD = 31.2;
-const CRYPTO = {
-  btc: ["bitcoin", "BTC", "Bitcoin"],
-  bitcoin: ["bitcoin", "BTC", "Bitcoin"],
-  eth: ["ethereum", "ETH", "Ethereum"],
-  ethereum: ["ethereum", "ETH", "Ethereum"],
-  sol: ["solana", "SOL", "Solana"],
-  bnb: ["binancecoin", "BNB", "BNB"],
-  xrp: ["ripple", "XRP", "XRP"],
-  ada: ["cardano", "ADA", "Cardano"],
-  doge: ["dogecoin", "DOGE", "Dogecoin"],
-  usdt: ["tether", "USDT", "Tether"],
-  usdc: ["usd-coin", "USDC", "USD Coin"],
-  pi: ["okx:PI-USDT", "PI", "Pi Network"],
-  "pi network": ["okx:PI-USDT", "PI", "Pi Network"],
-  pinetwork: ["okx:PI-USDT", "PI", "Pi Network"],
-  "okx:pi-usdt": ["okx:PI-USDT", "PI", "Pi Network"],
-  link: ["chainlink", "LINK", "Chainlink"],
-  ltc: ["litecoin", "LTC", "Litecoin"]
-};
-const OKX_CRYPTO = { "okx:pi-usdt": { instId: "PI-USDT", symbol: "PI", name: "Pi Network" } };
-const KIND = { crypto: "加密貨幣", "us-stock": "美股", "tw-stock": "台股", manual: "手動資產" };
-const ALLOCATION_LIMIT = 20;
-const SORT_DEFAULT = { asset: "asc", quantity: "desc", averageCost: "desc", price: "desc", value: "desc", profit: "desc", profitPercent: "desc" };
-const COLORS = ["#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43", "#4d908e", "#9a6b3f", "#2563eb", "#16a34a", "#dc2626", "#9333ea", "#0891b2", "#ca8a04", "#be123c", "#0f766e", "#7c3aed", "#15803d", "#ea580c", "#0284c7", "#a16207", "#64748b"];
-const GF_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
-const GF_US = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
-const GF_HINTS = { AAPL: "NASDAQ", AMD: "NASDAQ", AMZN: "NASDAQ", COST: "NASDAQ", GOOGL: "NASDAQ", GOOG: "NASDAQ", META: "NASDAQ", MSFT: "NASDAQ", NFLX: "NASDAQ", NVDA: "NASDAQ", QQQ: "NASDAQ", TQQQ: "NASDAQ", TSLA: "NASDAQ", VOO: "NYSEARCA", SPY: "NYSEARCA", IVV: "NYSEARCA", DIA: "NYSEARCA", IWM: "NYSEARCA", AWR: "NYSE", BA: "NYSE", BAC: "NYSE", BABA: "NYSE", BEN: "NYSE", BRK: "NYSE", CCL: "NYSE", DIS: "NYSE", EL: "NYSE", JPM: "NYSE", KO: "NYSE", NKE: "NYSE", TSM: "NYSE", UNH: "NYSE", V: "NYSE", WMT: "NYSE" };
-const $ = (id) => document.getElementById(id);
-const el = {
-  sync: $("syncStatus"), total: $("totalValue"), cost: $("totalCost"), profit: $("totalProfit"),
-  profitPct: $("totalProfitPercent"), count: $("positionCount"), baseHint: $("baseCurrencyHint"),
-  quoteHealth: $("quoteHealth"), fxStatus: $("fxStatus"), refresh: $("refreshButton"),
-  form: $("assetForm"), formTitle: $("formTitle"), editingId: $("editingId"), kind: $("assetKind"),
-  symbol: $("assetSymbol"), name: $("assetName"), qty: $("assetQuantity"), avg: $("assetAverageCost"),
-  costCurrency: $("costCurrency"), manualPrice: $("manualPrice"), manualCurrency: $("manualCurrency"),
-  submit: $("submitAssetButton"), cancel: $("cancelEditButton"), export: $("exportButton"),
-  import: $("importButton"), importFile: $("importFile"), allocTotal: $("allocationTotal"),
-  canvas: $("allocationChart"), insights: $("allocationInsights"), legend: $("allocationLegend"), rows: $("positionsBody"),
-  empty: $("emptyState"), status: $("statusMessage"), search: $("positionSearch"), sortButtons: document.querySelectorAll("[data-sort-field]"),
-  baseButtons: document.querySelectorAll("[data-base-currency]")
-};
-const state = load();
+const STOCK_QUOTE_DELAY_MS = 1_800;
+const GITHUB_API_BASE = "https://api.github.com";
+const SYNC_FILE_NAME = "wealthtrack-sync.json";
+const SYNC_GIST_DESCRIPTION = "WealthTrack private sync";
 
-function load() {
-  const fresh = { positions: [], baseCurrency: "TWD", sortMode: "value-desc", quotes: {}, fx: { USD: 1, TWD: FALLBACK_TWD }, fxAt: null, refreshing: false, lastSync: null, errors: [], allocationHoverKey: null, allocationPinnedKey: null };
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORE) || "{}");
-    if (Array.isArray(saved.positions)) fresh.positions = saved.positions;
-    if (saved.baseCurrency === "USD" || saved.baseCurrency === "TWD") fresh.baseCurrency = saved.baseCurrency;
-    if (typeof saved.sortMode === "string") fresh.sortMode = saved.sortMode;
-    if (saved.quotes && typeof saved.quotes === "object") {
-      fresh.quotes = Object.fromEntries(Object.entries(saved.quotes).filter(([, q]) => q && Number.isFinite(Number(q.price)) && typeof q.currency === "string"));
-    }
-    if (saved.fx?.rates?.TWD) fresh.fx = { USD: 1, TWD: Number(saved.fx.rates.TWD) };
-  } catch (error) {
-    console.warn("load failed", error);
+const CRYPTO_ALIASES = {
+  btc: { id: "bitcoin", symbol: "BTC", name: "Bitcoin" },
+  bitcoin: { id: "bitcoin", symbol: "BTC", name: "Bitcoin" },
+  eth: { id: "ethereum", symbol: "ETH", name: "Ethereum" },
+  ethereum: { id: "ethereum", symbol: "ETH", name: "Ethereum" },
+  sol: { id: "solana", symbol: "SOL", name: "Solana" },
+  solana: { id: "solana", symbol: "SOL", name: "Solana" },
+  bnb: { id: "binancecoin", symbol: "BNB", name: "BNB" },
+  xrp: { id: "ripple", symbol: "XRP", name: "XRP" },
+  ada: { id: "cardano", symbol: "ADA", name: "Cardano" },
+  doge: { id: "dogecoin", symbol: "DOGE", name: "Dogecoin" },
+  usdt: { id: "tether", symbol: "USDT", name: "Tether" },
+  usdc: { id: "usd-coin", symbol: "USDC", name: "USD Coin" },
+  pi: { id: "okx:PI-USDT", symbol: "PI", name: "Pi Network" },
+  "pi network": { id: "okx:PI-USDT", symbol: "PI", name: "Pi Network" },
+  pinetwork: { id: "okx:PI-USDT", symbol: "PI", name: "Pi Network" },
+  "okx:pi-usdt": { id: "okx:PI-USDT", symbol: "PI", name: "Pi Network" },
+  avax: { id: "avalanche-2", symbol: "AVAX", name: "Avalanche" },
+  dot: { id: "polkadot", symbol: "DOT", name: "Polkadot" },
+  link: { id: "chainlink", symbol: "LINK", name: "Chainlink" },
+  ltc: { id: "litecoin", symbol: "LTC", name: "Litecoin" },
+  bch: { id: "bitcoin-cash", symbol: "BCH", name: "Bitcoin Cash" }
+};
+
+const OKX_CRYPTO_QUOTES = {
+  "okx:pi-usdt": { instId: "PI-USDT", symbol: "PI", name: "Pi Network" }
+};
+
+const KIND_LABELS = {
+  crypto: "加密貨幣",
+  "us-stock": "美股",
+  "tw-stock": "台股",
+  manual: "手動資產"
+};
+
+const ALLOCATION_LIMIT = 20;
+const CHART_COLORS = [
+  "#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43",
+  "#4d908e", "#9a6b3f", "#2563eb", "#16a34a", "#dc2626",
+  "#9333ea", "#0891b2", "#ca8a04", "#be123c", "#0f766e",
+  "#7c3aed", "#15803d", "#ea580c", "#0284c7", "#a16207",
+  "#64748b"
+];
+const GOOGLE_FINANCE_READER_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
+const DEFAULT_GOOGLE_US_EXCHANGES = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
+const GOOGLE_FINANCE_EXCHANGE_HINTS = {
+  AAPL: "NASDAQ",
+  AMD: "NASDAQ",
+  AMZN: "NASDAQ",
+  COST: "NASDAQ",
+  GOOGL: "NASDAQ",
+  GOOG: "NASDAQ",
+  META: "NASDAQ",
+  MSFT: "NASDAQ",
+  NFLX: "NASDAQ",
+  NVDA: "NASDAQ",
+  QQQ: "NASDAQ",
+  TQQQ: "NASDAQ",
+  TSLA: "NASDAQ",
+  VOO: "NYSEARCA",
+  SPY: "NYSEARCA",
+  IVV: "NYSEARCA",
+  DIA: "NYSEARCA",
+  IWM: "NYSEARCA",
+  AWR: "NYSE",
+  BA: "NYSE",
+  BAC: "NYSE",
+  BABA: "NYSE",
+  BEN: "NYSE",
+  BRK: "NYSE",
+  CCL: "NYSE",
+  DIS: "NYSE",
+  EL: "NYSE",
+  JPM: "NYSE",
+  KO: "NYSE",
+  NKE: "NYSE",
+  TSM: "NYSE",
+  UNH: "NYSE",
+  V: "NYSE",
+  WMT: "NYSE"
+};
+
+const state = {
+  positions: [],
+  baseCurrency: "TWD",
+  quotes: {},
+  fx: {
+    rates: { USD: 1, TWD: FALLBACK_USD_TWD },
+    asOf: null,
+    source: "fallback"
+  },
+  sortMode: "value-desc",
+  isRefreshing: false,
+  lastSync: null,
+  quoteErrors: [],
+  allocationHoverKey: null,
+  allocationPinnedKey: null,
+  cloud: {
+    token: "",
+    gistId: "",
+    autoSync: false,
+    lastPulledAt: null,
+    lastPushedAt: null,
+    lastRemoteUpdatedAt: null,
+    lastHash: "",
+    status: "",
+    busy: false
   }
-  return fresh;
+};
+
+let autoSyncTimer = null;
+
+const SORT_DEFAULT_DIRECTIONS = {
+  asset: "asc",
+  quantity: "desc",
+  averageCost: "desc",
+  price: "desc",
+  value: "desc",
+  profit: "desc",
+  profitPercent: "desc"
+};
+
+const dom = {
+  syncStatus: document.querySelector("#syncStatus"),
+  totalValue: document.querySelector("#totalValue"),
+  totalCost: document.querySelector("#totalCost"),
+  totalProfit: document.querySelector("#totalProfit"),
+  totalProfitPercent: document.querySelector("#totalProfitPercent"),
+  positionCount: document.querySelector("#positionCount"),
+  baseCurrencyHint: document.querySelector("#baseCurrencyHint"),
+  quoteHealth: document.querySelector("#quoteHealth"),
+  fxStatus: document.querySelector("#fxStatus"),
+  refreshButton: document.querySelector("#refreshButton"),
+  baseButtons: document.querySelectorAll("[data-base-currency]"),
+  form: document.querySelector("#assetForm"),
+  formTitle: document.querySelector("#formTitle"),
+  editingId: document.querySelector("#editingId"),
+  assetKind: document.querySelector("#assetKind"),
+  assetSymbol: document.querySelector("#assetSymbol"),
+  assetName: document.querySelector("#assetName"),
+  assetQuantity: document.querySelector("#assetQuantity"),
+  assetAverageCost: document.querySelector("#assetAverageCost"),
+  costCurrency: document.querySelector("#costCurrency"),
+  manualPrice: document.querySelector("#manualPrice"),
+  manualCurrency: document.querySelector("#manualCurrency"),
+  submitAssetButton: document.querySelector("#submitAssetButton"),
+  cancelEditButton: document.querySelector("#cancelEditButton"),
+  exportButton: document.querySelector("#exportButton"),
+  importButton: document.querySelector("#importButton"),
+  importFile: document.querySelector("#importFile"),
+  syncToken: document.querySelector("#syncToken"),
+  syncGistId: document.querySelector("#syncGistId"),
+  syncAuto: document.querySelector("#syncAuto"),
+  syncSaveButton: document.querySelector("#syncSaveButton"),
+  cloudUploadButton: document.querySelector("#cloudUploadButton"),
+  cloudDownloadButton: document.querySelector("#cloudDownloadButton"),
+  cloudSyncStatus: document.querySelector("#cloudSyncStatus"),
+  allocationTotal: document.querySelector("#allocationTotal"),
+  allocationChart: document.querySelector("#allocationChart"),
+  allocationInsights: document.querySelector("#allocationInsights"),
+  allocationLegend: document.querySelector("#allocationLegend"),
+  positionsBody: document.querySelector("#positionsBody"),
+  emptyState: document.querySelector("#emptyState"),
+  statusMessage: document.querySelector("#statusMessage"),
+  positionSearch: document.querySelector("#positionSearch"),
+  sortButtons: document.querySelectorAll("[data-sort-field]")
+};
+
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    if (Array.isArray(saved.positions)) {
+      state.positions = saved.positions.map(normalizeImportedPosition).filter(Boolean);
+    }
+    if (saved.baseCurrency === "USD" || saved.baseCurrency === "TWD") {
+      state.baseCurrency = saved.baseCurrency;
+    }
+    if (typeof saved.sortMode === "string") {
+      state.sortMode = saved.sortMode;
+    }
+    if (saved.quotes && typeof saved.quotes === "object") {
+      state.quotes = Object.fromEntries(
+        Object.entries(saved.quotes).filter(([, quote]) =>
+          quote && Number.isFinite(Number(quote.price)) && typeof quote.currency === "string"
+        )
+      );
+    }
+    if (saved.fx?.rates?.USD && saved.fx?.rates?.TWD) {
+      state.fx = saved.fx;
+    }
+    if (saved.cloud && typeof saved.cloud === "object") {
+      state.cloud = {
+        ...state.cloud,
+        token: typeof saved.cloud.token === "string" ? saved.cloud.token : "",
+        gistId: typeof saved.cloud.gistId === "string" ? saved.cloud.gistId : "",
+        autoSync: Boolean(saved.cloud.autoSync),
+        lastPulledAt: saved.cloud.lastPulledAt || null,
+        lastPushedAt: saved.cloud.lastPushedAt || null,
+        lastRemoteUpdatedAt: saved.cloud.lastRemoteUpdatedAt || null,
+        lastHash: typeof saved.cloud.lastHash === "string" ? saved.cloud.lastHash : ""
+      };
+    }
+  } catch (error) {
+    console.warn("Unable to load saved portfolio", error);
+  }
 }
 
-function save() {
-  localStorage.setItem(STORE, JSON.stringify({
+function saveState(options = {}) {
+  const { sync = true } = options;
+  const payload = {
     positions: state.positions,
     baseCurrency: state.baseCurrency,
     sortMode: state.sortMode,
     quotes: state.quotes,
-    fx: { rates: state.fx }
-  }));
+    fx: state.fx,
+    cloud: {
+      token: state.cloud.token,
+      gistId: state.cloud.gistId,
+      autoSync: state.cloud.autoSync,
+      lastPulledAt: state.cloud.lastPulledAt,
+      lastPushedAt: state.cloud.lastPushedAt,
+      lastRemoteUpdatedAt: state.cloud.lastRemoteUpdatedAt,
+      lastHash: state.cloud.lastHash
+    }
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  if (sync) scheduleAutoSync();
 }
 
 function uid() {
-  return globalThis.crypto?.randomUUID?.() || `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (crypto?.randomUUID) return crypto.randomUUID();
+  return `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function cryptoMeta(symbol) {
-  const key = String(symbol).trim().toLowerCase();
-  const found = CRYPTO[key];
-  if (found) return { id: found[0], symbol: found[1], name: found[2] };
-  return { id: key, symbol: key.toUpperCase(), name: key.replace(/-/g, " ") || "Crypto" };
+function normalizeImportedPosition(position) {
+  if (!position || typeof position !== "object") return null;
+  const quantity = Number(position.quantity);
+  const averageCost = Number(position.averageCost);
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  if (!Number.isFinite(averageCost) || averageCost < 0) return null;
+
+  const draft = {
+    id: position.id || uid(),
+    kind: position.kind || "manual",
+    symbol: position.symbol || position.marketSymbol || position.name || "Asset",
+    name: position.name || "",
+    quantity,
+    averageCost,
+    costCurrency: position.costCurrency || "QUOTE",
+    manualPrice: position.manualPrice,
+    manualCurrency: position.manualCurrency || "TWD",
+    createdAt: position.createdAt || new Date().toISOString()
+  };
+  return normalizeDraft(draft, draft.id, draft.createdAt);
 }
 
-function twSymbol(value) {
-  const raw = String(value).trim().toUpperCase().replace(/\s+/g, "");
-  return /^\d{4,6}$/.test(raw) ? `${raw}.TW` : raw;
-}
+function normalizeDraft(draft, existingId = uid(), createdAt = new Date().toISOString()) {
+  const kind = ["crypto", "us-stock", "tw-stock", "manual"].includes(draft.kind) ? draft.kind : "manual";
+  const rawSymbol = String(draft.symbol || "").trim();
+  const quantity = Number(draft.quantity);
+  const averageCost = Number(draft.averageCost);
+  const costCurrency = ["QUOTE", "TWD", "USD"].includes(draft.costCurrency) ? draft.costCurrency : "QUOTE";
+  const manualCurrency = draft.manualCurrency === "USD" ? "USD" : "TWD";
+  const manualPrice = Number(draft.manualPrice);
 
-function normalize(input, id = uid(), createdAt = new Date().toISOString()) {
-  const kind = ["crypto", "us-stock", "tw-stock", "manual"].includes(input.kind) ? input.kind : "manual";
-  const raw = String(input.symbol || "").trim();
-  const quantity = Number(input.quantity);
-  const averageCost = Number(input.averageCost);
-  const costCurrency = ["QUOTE", "TWD", "USD"].includes(input.costCurrency) ? input.costCurrency : "QUOTE";
-  const manualCurrency = input.manualCurrency === "USD" ? "USD" : "TWD";
-  if (!raw) throw new Error("請輸入資產代號");
+  if (!rawSymbol) throw new Error("請輸入資產代號");
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("請輸入大於 0 的數量");
   if (!Number.isFinite(averageCost) || averageCost < 0) throw new Error("請輸入有效的平均成本");
+
   if (kind === "crypto") {
-    const m = cryptoMeta(raw);
-    return { id, kind, symbol: m.symbol, marketSymbol: m.id, name: input.name || m.name, quantity, averageCost, costCurrency, manualPrice: null, manualCurrency, createdAt };
+    const meta = getCryptoMeta(rawSymbol);
+    return {
+      id: existingId,
+      kind,
+      symbol: meta.symbol,
+      marketSymbol: meta.id,
+      name: String(draft.name || meta.name).trim() || meta.name,
+      quantity,
+      averageCost,
+      costCurrency,
+      manualPrice: null,
+      manualCurrency,
+      createdAt
+    };
   }
-  if (kind === "tw-stock" || kind === "us-stock") {
-    const marketSymbol = kind === "tw-stock" ? twSymbol(raw) : raw.toUpperCase().replace(/\s+/g, "");
-    return { id, kind, symbol: marketSymbol, marketSymbol, name: input.name || marketSymbol, quantity, averageCost, costCurrency, manualPrice: null, manualCurrency, createdAt };
+
+  if (kind === "tw-stock") {
+    const marketSymbol = normalizeTaiwanSymbol(rawSymbol);
+    return {
+      id: existingId,
+      kind,
+      symbol: marketSymbol,
+      marketSymbol,
+      name: String(draft.name || marketSymbol).trim() || marketSymbol,
+      quantity,
+      averageCost,
+      costCurrency,
+      manualPrice: null,
+      manualCurrency,
+      createdAt
+    };
   }
-  const manualPrice = Number(input.manualPrice);
-  return { id, kind: "manual", symbol: raw, marketSymbol: raw, name: input.name || raw, quantity, averageCost, costCurrency: costCurrency === "QUOTE" ? manualCurrency : costCurrency, manualPrice: Number.isFinite(manualPrice) ? manualPrice : averageCost, manualCurrency, createdAt };
+
+  if (kind === "us-stock") {
+    const marketSymbol = rawSymbol.toUpperCase().replace(/\s+/g, "");
+    return {
+      id: existingId,
+      kind,
+      symbol: marketSymbol,
+      marketSymbol,
+      name: String(draft.name || marketSymbol).trim() || marketSymbol,
+      quantity,
+      averageCost,
+      costCurrency,
+      manualPrice: null,
+      manualCurrency,
+      createdAt
+    };
+  }
+
+  const manualName = String(draft.name || rawSymbol).trim() || rawSymbol;
+  return {
+    id: existingId,
+    kind: "manual",
+    symbol: rawSymbol,
+    marketSymbol: rawSymbol,
+    name: manualName,
+    quantity,
+    averageCost,
+    costCurrency: costCurrency === "QUOTE" ? manualCurrency : costCurrency,
+    manualPrice: Number.isFinite(manualPrice) && manualPrice >= 0 ? manualPrice : averageCost,
+    manualCurrency,
+    createdAt
+  };
 }
 
-function keyOf(p) {
-  if (p.kind === "crypto") return `crypto:${p.marketSymbol}`;
-  if (p.kind === "manual") return `manual:${p.id}`;
-  return `stock:${p.marketSymbol}`;
+function getCryptoMeta(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (CRYPTO_ALIASES[key]) return CRYPTO_ALIASES[key];
+  const title = key.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return {
+    id: key,
+    symbol: key.toUpperCase(),
+    name: title || "Crypto"
+  };
+}
+
+function normalizeTaiwanSymbol(value) {
+  const raw = String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  if (/^\d{4,6}$/.test(raw)) return `${raw}.TW`;
+  return raw;
+}
+
+function quoteKey(position) {
+  if (position.kind === "crypto") return `crypto:${position.marketSymbol}`;
+  if (position.kind === "manual") return `manual:${position.id}`;
+  return `stock:${position.marketSymbol}`;
 }
 
 function stockKindForSymbol(symbol) {
   const raw = String(symbol || "").trim().toUpperCase().replace(/\s+/g, "");
-  if (!raw || CRYPTO[raw.toLowerCase()]) return null;
+  if (!raw || CRYPTO_MAP[raw.toLowerCase()]) return null;
   if (/^\d{4,6}(\.(TW|TWO))?$/.test(raw)) return "tw-stock";
-  if (GF_HINTS[raw.replace(".B", "")] || /^[A-Z.]{1,5}$/.test(raw)) return "us-stock";
+  if (GOOGLE_FINANCE_EXCHANGE_HINTS[raw.replace(".B", "")] || /^[A-Z.]{1,5}$/.test(raw)) return "us-stock";
   return null;
 }
 
-function quoteOf(p) {
-  if (p.kind === "manual") return { price: Number(p.manualPrice), currency: p.manualCurrency, source: "手動", changePercent: null };
-  return state.quotes[keyOf(p)];
+function getQuote(position) {
+  if (position.kind === "manual") {
+    return {
+      price: Number(position.manualPrice),
+      currency: position.manualCurrency || state.baseCurrency,
+      changePercent: null,
+      source: "手動",
+      asOf: Date.now()
+    };
+  }
+  return state.quotes[quoteKey(position)];
 }
 
-function convert(amount, from, to) {
-  from = (from || to).toUpperCase();
-  to = (to || state.baseCurrency).toUpperCase();
-  if (!Number.isFinite(amount)) return NaN;
-  if (from === to) return amount;
-  if (!state.fx[from] || !state.fx[to]) return NaN;
-  return amount / state.fx[from] * state.fx[to];
-}
-
-function currency(value, cur = state.baseCurrency, compact = false) {
+function formatCurrency(value, currency = state.baseCurrency) {
   if (!Number.isFinite(value)) return "--";
-  const text = new Intl.NumberFormat("zh-TW", {
+  const abs = Math.abs(value);
+  const fractionDigits = currency === "TWD" && abs >= 100 ? 0 : abs >= 1000 ? 2 : 4;
+  const formatted = new Intl.NumberFormat("zh-TW", {
     style: "currency",
-    currency: cur,
-    notation: compact ? "compact" : "standard",
-    maximumFractionDigits: compact ? 1 : (cur === "TWD" && Math.abs(value) >= 100 ? 0 : 2)
+    currency,
+    maximumFractionDigits: fractionDigits
   }).format(value);
-  if (cur === "TWD") return text.includes("NT$") ? text : text.replace("$", "NT$");
-  if (cur === "USD") return text.includes("US$") ? text : text.replace("$", "US$");
-  return text;
+  return normalizeCurrencyLabel(formatted, currency);
 }
 
-function number(value) {
-  return Number.isFinite(value) ? new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 6 }).format(value) : "--";
+function formatCompactCurrency(value, currency = state.baseCurrency) {
+  if (!Number.isFinite(value)) return "--";
+  const formatted = new Intl.NumberFormat("zh-TW", {
+    style: "currency",
+    currency,
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(value);
+  return normalizeCurrencyLabel(formatted, currency);
 }
 
-function percent(value) {
-  return Number.isFinite(value) ? `${value > 0 ? "+" : ""}${value.toFixed(2)}%` : "--";
+function normalizeCurrencyLabel(formatted, currency) {
+  if (currency === "TWD") return formatted.includes("NT$") ? formatted : formatted.replace("$", "NT$");
+  if (currency === "USD") return formatted.includes("US$") ? formatted : formatted.replace("$", "US$");
+  return formatted;
+}
+
+function formatNumber(value, maximumFractionDigits = 6) {
+  if (!Number.isFinite(value)) return "--";
+  return new Intl.NumberFormat("zh-TW", { maximumFractionDigits }).format(value);
+}
+
+function formatPercent(value) {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
 }
 
 function valueClass(value) {
@@ -167,89 +435,190 @@ function valueClass(value) {
   return value > 0 ? "profit-positive" : "profit-negative";
 }
 
-function metrics(p) {
-  const q = quoteOf(p);
-  const qcur = q?.currency || p.manualCurrency || state.baseCurrency;
-  const price = Number(q?.price);
-  const value = Number.isFinite(price) ? convert(price * p.quantity, qcur, state.baseCurrency) : NaN;
-  const ccur = p.costCurrency === "QUOTE" ? qcur : p.costCurrency;
-  const cost = convert(Number(p.averageCost) * p.quantity, ccur, state.baseCurrency);
-  const profit = Number.isFinite(value) && Number.isFinite(cost) ? value - cost : NaN;
-  return { q, qcur, ccur, value, cost, profit, profitPct: cost > 0 ? profit / cost * 100 : NaN };
+function convertCurrency(amount, fromCurrency, toCurrency) {
+  const from = (fromCurrency || toCurrency || state.baseCurrency).toUpperCase();
+  const to = (toCurrency || state.baseCurrency).toUpperCase();
+  if (!Number.isFinite(amount)) return NaN;
+  if (from === to) return amount;
+  const fromRate = state.fx.rates[from];
+  const toRate = state.fx.rates[to];
+  if (!fromRate || !toRate) return NaN;
+  return (amount / fromRate) * toRate;
 }
 
-function portfolio() {
-  return state.positions.reduce((t, p) => {
-    const m = metrics(p);
-    if (Number.isFinite(m.value)) { t.value += m.value; t.quoted += 1; }
-    if (Number.isFinite(m.cost)) t.cost += m.cost;
-    return t;
-  }, { value: 0, cost: 0, quoted: 0 });
+function calculatePosition(position) {
+  const quote = getQuote(position);
+  const quoteCurrency = quote?.currency || position.manualCurrency || state.baseCurrency;
+  const price = Number(quote?.price);
+  const currentValue = Number.isFinite(price)
+    ? convertCurrency(price * position.quantity, quoteCurrency, state.baseCurrency)
+    : NaN;
+
+  const costCurrency = position.costCurrency === "QUOTE" ? quoteCurrency : position.costCurrency;
+  const costValue = convertCurrency(position.averageCost * position.quantity, costCurrency, state.baseCurrency);
+  const profit = Number.isFinite(currentValue) && Number.isFinite(costValue) ? currentValue - costValue : NaN;
+  const profitPercent = Number.isFinite(profit) && costValue > 0 ? (profit / costValue) * 100 : NaN;
+
+  return {
+    quote,
+    quoteCurrency,
+    currentValue,
+    costValue,
+    profit,
+    profitPercent
+  };
+}
+
+function calculatePortfolio() {
+  return state.positions.reduce(
+    (totals, position) => {
+      const metrics = calculatePosition(position);
+      if (Number.isFinite(metrics.currentValue)) totals.value += metrics.currentValue;
+      if (Number.isFinite(metrics.costValue)) totals.cost += metrics.costValue;
+      if (Number.isFinite(metrics.currentValue)) totals.quoted += 1;
+      return totals;
+    },
+    { value: 0, cost: 0, quoted: 0 }
+  );
 }
 
 function render() {
-  const t = portfolio();
-  const profit = t.value - t.cost;
-  el.total.textContent = currency(t.value);
-  el.total.className = valueClass(t.value);
-  el.cost.textContent = currency(t.cost);
-  el.cost.className = valueClass(t.cost);
-  el.profit.textContent = currency(profit);
-  el.profit.className = valueClass(profit);
-  el.profitPct.textContent = percent(t.cost > 0 ? profit / t.cost * 100 : NaN);
-  el.profitPct.className = valueClass(t.cost > 0 ? profit / t.cost * 100 : NaN);
-  el.count.textContent = `${state.positions.length} 筆資產`;
-  el.baseHint.textContent = `以 ${state.baseCurrency} 顯示`;
-  el.quoteHealth.textContent = `${t.quoted}/${state.positions.length}`;
-  el.fxStatus.textContent = state.fxAt ? `匯率 ${time(state.fxAt)}` : "使用備用匯率";
-  el.allocTotal.textContent = currency(t.value);
-  el.allocTotal.className = valueClass(t.value);
-  el.sync.textContent = state.refreshing ? "正在同步市場價格..." : state.lastSync ? `最近更新 ${time(state.lastSync)}` : "尚未同步市場價格";
-  el.status.textContent = !state.positions.length ? "新增資產後會開始追蹤市值與損益。" : state.errors.length ? `${state.errors.length} 個報價暫時無法更新${t.quoted ? "，已保留可用的上次報價" : ""}：${state.errors.slice(0, 3).join("、")}` : `已取得 ${t.quoted} 筆報價，自動刷新間隔 ${Math.round(REFRESH_MS / 60000)} 分鐘。`;
-  el.baseButtons.forEach((b) => b.classList.toggle("is-active", b.dataset.baseCurrency === state.baseCurrency));
+  const totals = calculatePortfolio();
+  const profit = totals.value - totals.cost;
+  const profitPercent = totals.cost > 0 ? (profit / totals.cost) * 100 : NaN;
+
+  dom.totalValue.textContent = formatCurrency(totals.value);
+  dom.totalValue.className = valueClass(totals.value);
+  dom.totalCost.textContent = formatCurrency(totals.cost);
+  dom.totalCost.className = valueClass(totals.cost);
+  dom.totalProfit.textContent = formatCurrency(profit);
+  dom.totalProfit.className = valueClass(profit);
+  dom.totalProfitPercent.textContent = formatPercent(profitPercent);
+  dom.totalProfitPercent.className = valueClass(profitPercent);
+  dom.positionCount.textContent = `${state.positions.length} 筆資產`;
+  dom.baseCurrencyHint.textContent = `以 ${state.baseCurrency} 顯示`;
+  dom.allocationTotal.textContent = formatCurrency(totals.value);
+  dom.allocationTotal.className = valueClass(totals.value);
+  dom.quoteHealth.textContent = `${totals.quoted}/${state.positions.length}`;
+
+  const fxLabel = state.fx.asOf ? `匯率 ${formatTime(state.fx.asOf)}` : "使用備用匯率";
+  dom.fxStatus.textContent = fxLabel;
+
+  if (state.isRefreshing) {
+    dom.syncStatus.textContent = "正在同步市場價格...";
+  } else if (state.lastSync) {
+    dom.syncStatus.textContent = `最近更新 ${formatTime(state.lastSync)}`;
+  } else {
+    dom.syncStatus.textContent = "尚未同步市場價格";
+  }
+
+  renderStatus(totals);
   renderRows();
   updateSortButtons();
-  drawChart();
+  drawAllocationChart();
+  updateCurrencyButtons();
+  renderCloudSync();
+}
+
+function renderStatus(totals) {
+  if (!state.positions.length) {
+    dom.statusMessage.textContent = "新增資產後會開始追蹤市值與損益。";
+    return;
+  }
+
+  if (state.quoteErrors.length) {
+    const cacheNote = totals.quoted ? "，已保留可用的上次報價" : "";
+    dom.statusMessage.textContent = `${state.quoteErrors.length} 個報價暫時無法更新${cacheNote}：${state.quoteErrors.slice(0, 3).join("、")}`;
+    return;
+  }
+
+  dom.statusMessage.textContent = `已取得 ${totals.quoted} 筆報價，自動刷新間隔 ${Math.round(REFRESH_MS / 60_000)} 分鐘。`;
 }
 
 function renderRows() {
-  const query = el.search.value.trim().toLowerCase();
+  const query = dom.positionSearch.value.trim().toLowerCase();
   const rows = sortRows(state.positions
-    .map((p) => ({ p, m: metrics(p) }))
-    .filter(({ p }) => !query || `${p.symbol} ${p.name} ${KIND[p.kind]}`.toLowerCase().includes(query)));
-  el.rows.innerHTML = "";
-  el.empty.classList.toggle("is-hidden", state.positions.length > 0);
-  rows.forEach(({ p, m }) => {
-    const qPrice = Number(m.q?.price);
-    const ch = Number(m.q?.changePercent);
-    const qPriceClass = valueClass(qPrice);
-    const chClass = valueClass(ch);
-    const qtyClass = valueClass(p.quantity);
-    const avgClass = valueClass(p.averageCost);
-    const costClass = valueClass(m.cost);
-    const valueCellClass = valueClass(m.value);
-    const profitClass = valueClass(m.profit);
+    .map((position) => ({ position, metrics: calculatePosition(position) }))
+    .filter(({ position }) => {
+      if (!query) return true;
+      return `${position.symbol} ${position.name} ${KIND_LABELS[position.kind]}`.toLowerCase().includes(query);
+    }));
+
+  dom.positionsBody.innerHTML = "";
+  dom.emptyState.classList.toggle("is-hidden", state.positions.length > 0);
+
+  for (const { position, metrics } of rows) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><div class="asset-cell"><span class="asset-badge">${esc(p.symbol.replace(/\..+$/, "").slice(0, 3))}</span><span class="asset-title"><strong>${esc(p.name)}</strong><small>${esc(p.symbol)} · ${esc(KIND[p.kind])}</small></span></div></td><td class="${qtyClass}">${number(p.quantity)}</td><td class="${avgClass}">${currency(p.averageCost, m.ccur)}<div class="sub-value ${costClass}">${currency(m.cost)}</div></td><td class="${qPriceClass}">${Number.isFinite(qPrice) ? currency(qPrice, m.qcur) : "--"}<div class="sub-value ${chClass}">${Number.isFinite(ch) ? percent(ch) : esc(m.q?.source || "等待報價")}</div></td><td class="${valueCellClass}">${currency(m.value)}</td><td class="${profitClass}">${currency(m.profit)}<div>${percent(m.profitPct)}</div></td><td><div class="row-actions"><button class="row-button" data-action="edit" data-id="${esc(p.id)}" type="button">編輯</button><button class="row-button danger" data-action="delete" data-id="${esc(p.id)}" type="button">刪除</button></div></td>`;
-    el.rows.appendChild(tr);
-  });
+    const quote = metrics.quote;
+    const quoteCurrency = metrics.quoteCurrency;
+    const quotePrice = Number(quote?.price);
+    const costCurrency = position.costCurrency === "QUOTE" ? quoteCurrency : position.costCurrency;
+    const badgeText = position.symbol.replace(/\..+$/, "").slice(0, 3).toUpperCase();
+    const change = Number(quote?.changePercent);
+    const quotePriceClass = valueClass(quotePrice);
+    const changeClass = valueClass(change);
+    const quantityClass = valueClass(position.quantity);
+    const averageCostClass = valueClass(position.averageCost);
+    const costValueClass = valueClass(metrics.costValue);
+    const currentValueClass = valueClass(metrics.currentValue);
+    const profitClass = valueClass(metrics.profit);
+
+    tr.innerHTML = `
+      <td>
+        <div class="asset-cell">
+          <span class="asset-badge">${escapeHtml(badgeText)}</span>
+          <span class="asset-title">
+            <strong>${escapeHtml(position.name)}</strong>
+            <small>${escapeHtml(position.symbol)} · ${escapeHtml(KIND_LABELS[position.kind])}</small>
+          </span>
+        </div>
+      </td>
+      <td class="${quantityClass}">${formatNumber(position.quantity)}</td>
+      <td class="${averageCostClass}">
+        ${formatCurrency(position.averageCost, costCurrency)}
+        <div class="sub-value ${costValueClass}">${formatCurrency(metrics.costValue)}</div>
+      </td>
+      <td class="${quotePriceClass}">
+        ${Number.isFinite(quotePrice) ? formatCurrency(quotePrice, quoteCurrency) : "--"}
+        <div class="sub-value ${changeClass}">
+          ${Number.isFinite(change) ? formatPercent(change) : escapeHtml(quote?.source || "等待報價")}
+        </div>
+      </td>
+      <td class="${currentValueClass}">${formatCurrency(metrics.currentValue)}</td>
+      <td class="${profitClass}">
+        ${formatCurrency(metrics.profit)}
+        <div>${formatPercent(metrics.profitPercent)}</div>
+      </td>
+      <td>
+        <div class="row-actions">
+          <button class="row-button" type="button" data-action="edit" data-id="${escapeHtml(position.id)}">編輯</button>
+          <button class="row-button danger" type="button" data-action="delete" data-id="${escapeHtml(position.id)}">刪除</button>
+        </div>
+      </td>
+    `;
+    dom.positionsBody.appendChild(tr);
+  }
 }
 
 function sortRows(rows) {
   const mode = state.sortMode || "value-desc";
   const [field, direction = "desc"] = mode.split("-");
   const dir = direction === "asc" ? 1 : -1;
+
   return rows.sort((a, b) => {
     if (field === "asset") {
-      const left = `${a.p.symbol} ${a.p.name}`.trim();
-      const right = `${b.p.symbol} ${b.p.name}`.trim();
+      const left = `${a.position.symbol} ${a.position.name}`.trim();
+      const right = `${b.position.symbol} ${b.position.name}`.trim();
       return left.localeCompare(right, "en", { numeric: true, sensitivity: "base" }) * dir;
     }
+
     const av = sortValue(a, field);
     const bv = sortValue(b, field);
     const aOk = Number.isFinite(av);
     const bOk = Number.isFinite(bv);
-    if (!aOk && !bOk) return a.p.symbol.localeCompare(b.p.symbol, "en", { numeric: true, sensitivity: "base" });
+    if (!aOk && !bOk) {
+      return a.position.symbol.localeCompare(b.position.symbol, "en", { numeric: true, sensitivity: "base" });
+    }
     if (!aOk) return 1;
     if (!bOk) return -1;
     return direction === "asc" ? av - bv : bv - av;
@@ -257,356 +626,621 @@ function sortRows(rows) {
 }
 
 function sortValue(row, field) {
-  if (field === "quantity") return Number(row.p.quantity);
-  if (field === "averageCost") return convert(Number(row.p.averageCost), row.m.ccur, state.baseCurrency);
-  if (field === "price") return convert(Number(row.m.q?.price), row.m.qcur, state.baseCurrency);
-  if (field === "profit") return Number(row.m.profit);
-  if (field === "profitPercent") return Number(row.m.profitPct);
-  return Number(row.m.value);
+  if (field === "quantity") return Number(row.position.quantity);
+  if (field === "averageCost") {
+    const costCurrency = row.position.costCurrency === "QUOTE" ? row.metrics.quoteCurrency : row.position.costCurrency;
+    return convertCurrency(Number(row.position.averageCost), costCurrency, state.baseCurrency);
+  }
+  if (field === "price") {
+    const quotePrice = Number(row.metrics.quote?.price);
+    return convertCurrency(quotePrice, row.metrics.quoteCurrency, state.baseCurrency);
+  }
+  if (field === "profit") return Number(row.metrics.profit);
+  if (field === "profitPercent") return Number(row.metrics.profitPercent);
+  return Number(row.metrics.currentValue);
 }
 
-function parseSort() {
+function parseSortMode() {
   const [field = "value", rawDirection] = String(state.sortMode || "").split("-");
-  return { field, direction: rawDirection === "asc" ? "asc" : "desc" };
+  return {
+    field,
+    direction: rawDirection === "asc" ? "asc" : "desc"
+  };
 }
 
-function setSort(field) {
-  const current = parseSort();
-  const direction = current.field === field ? (current.direction === "asc" ? "desc" : "asc") : (SORT_DEFAULT[field] || "desc");
+function setSortField(field) {
+  const current = parseSortMode();
+  const defaultDirection = SORT_DEFAULT_DIRECTIONS[field] || "desc";
+  const direction = current.field === field ? (current.direction === "asc" ? "desc" : "asc") : defaultDirection;
   state.sortMode = `${field}-${direction}`;
-  save(); renderRows(); updateSortButtons();
+  saveState();
+  renderRows();
+  updateSortButtons();
 }
 
 function updateSortButtons() {
-  const { field, direction } = parseSort();
-  el.sortButtons.forEach((button) => {
-    const active = button.dataset.sortField === field;
+  const { field, direction } = parseSortMode();
+  dom.sortButtons.forEach((button) => {
+    const isActive = button.dataset.sortField === field;
     const label = button.textContent.trim().replace(/[↕↑↓]/g, "");
-    button.classList.toggle("is-active", active);
-    button.dataset.sortDirection = active ? direction : "";
-    button.setAttribute("aria-label", `${label}排序，${active ? (direction === "asc" ? "目前低到高" : "目前高到低") : "未排序"}`);
+    button.classList.toggle("is-active", isActive);
+    button.dataset.sortDirection = isActive ? direction : "";
+    button.setAttribute("aria-label", `${label}排序，${isActive ? (direction === "asc" ? "目前低到高" : "目前高到低") : "未排序"}`);
   });
 }
 
-function drawChart(updateLegend = true) {
-  const canvas = el.canvas;
+function drawAllocationChart(updateLegend = true) {
+  const canvas = dom.allocationChart;
   const ctx = canvas.getContext("2d");
-  const size = 260, dpr = window.devicePixelRatio || 1;
-  canvas.width = size * dpr; canvas.height = size * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, size, size);
-  const items = state.positions.map((p) => ({ p, v: metrics(p).value })).filter((x) => Number.isFinite(x.v) && x.v > 0).sort((a, b) => b.v - a.v);
-  const total = items.reduce((s, x) => s + x.v, 0);
-  const chartItems = allocationItems(items);
-  const cx = size / 2, cy = size / 2, r = 92;
+  const dpr = window.devicePixelRatio || 1;
+  const cssSize = 260;
+  canvas.width = cssSize * dpr;
+  canvas.height = cssSize * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssSize, cssSize);
+
+  const items = state.positions
+    .map((position) => ({ position, value: calculatePosition(position).currentValue }))
+    .filter((item) => Number.isFinite(item.value) && item.value > 0)
+    .sort((a, b) => b.value - a.value);
+
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  const chartItems = getAllocationItems(items);
+  const cx = cssSize / 2;
+  const cy = cssSize / 2;
+  const radius = 92;
+  const width = 26;
+
   if (!total) {
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 26; ctx.strokeStyle = "#dfe7df"; ctx.stroke();
-    ctx.fillStyle = "#647067"; ctx.font = "700 16px system-ui"; ctx.textAlign = "center"; ctx.fillText("No Data", cx, cy + 5);
-    renderInsights([], 0);
-    if (updateLegend) el.legend.innerHTML = "<small>尚無可繪製的市值資料</small>";
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = "#dfe7df";
+    ctx.stroke();
+    ctx.fillStyle = "#647067";
+    ctx.font = "700 16px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No Data", cx, cy + 5);
+    renderAllocationInsights([], 0);
+    if (updateLegend) dom.allocationLegend.innerHTML = `<small>尚無可繪製的市值資料</small>`;
     return;
   }
-  const activeKey = activeAllocationKey(chartItems);
+
+  const activeKey = getActiveAllocationKey(chartItems);
   let start = -Math.PI / 2;
-  const segments = chartItems.map((item, i) => {
-    const angle = item.v / total * Math.PI * 2;
-    const segment = { item, i, start, end: start + angle };
+  const segments = chartItems.map((item, index) => {
+    const angle = (item.value / total) * Math.PI * 2;
+    const segment = { item, index, start, end: start + angle };
     start += angle;
     return segment;
   });
-  const draw = (segment, active) => {
-    ctx.beginPath(); ctx.save(); ctx.globalAlpha = activeKey && !active ? 0.44 : 1;
-    ctx.arc(cx, cy, active ? r + 9 : r, segment.start, segment.end);
-    ctx.lineWidth = active ? 35 : 26; ctx.lineCap = "round"; ctx.strokeStyle = COLORS[segment.i % COLORS.length];
-    if (active) { ctx.shadowColor = "rgba(11, 122, 117, 0.34)"; ctx.shadowBlur = 12; }
-    ctx.stroke(); ctx.restore();
+
+  const drawSegment = (segment, isActive) => {
+    ctx.beginPath();
+    ctx.save();
+    ctx.globalAlpha = activeKey && !isActive ? 0.44 : 1;
+    ctx.arc(cx, cy, isActive ? radius + 9 : radius, segment.start, segment.end);
+    ctx.lineWidth = isActive ? width + 9 : width;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = CHART_COLORS[segment.index % CHART_COLORS.length];
+    if (isActive) {
+      ctx.shadowColor = "rgba(11, 122, 117, 0.34)";
+      ctx.shadowBlur = 12;
+    }
+    ctx.stroke();
+    ctx.restore();
   };
-  segments.filter((segment) => segment.item.key !== activeKey).forEach((segment) => draw(segment, false));
+
+  segments.filter((segment) => segment.item.key !== activeKey).forEach((segment) => drawSegment(segment, false));
   const activeSegment = segments.find((segment) => segment.item.key === activeKey);
-  if (activeSegment) draw(activeSegment, true);
-  ctx.fillStyle = "#19211e"; ctx.font = "800 20px system-ui"; ctx.textAlign = "center"; ctx.fillText(currency(total, state.baseCurrency, true), cx, cy - 3);
-  ctx.fillStyle = "#647067"; ctx.font = "700 12px system-ui"; ctx.fillText(state.baseCurrency, cx, cy + 19);
-  renderInsights(items, total);
+  if (activeSegment) drawSegment(activeSegment, true);
+
+  ctx.fillStyle = "#19211e";
+  ctx.font = "800 20px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(formatCompactCurrency(total), cx, cy - 3);
+  ctx.fillStyle = "#647067";
+  ctx.font = "700 12px system-ui, sans-serif";
+  ctx.fillText(state.baseCurrency, cx, cy + 19);
+
+  renderAllocationInsights(items, total);
+
   if (updateLegend) {
-    el.legend.innerHTML = chartItems.map((x, i) => `<div class="legend-row${x.key === activeKey ? " is-active" : ""}" data-allocation-key="${esc(x.key)}" role="button" tabindex="0" aria-pressed="${x.key === state.allocationPinnedKey}"><span class="legend-dot" style="background:${COLORS[i % COLORS.length]}"></span><strong>${esc(x.label)}</strong><span class="legend-market-value">${currency(x.v)}</span><span class="legend-percent">${(x.v / total * 100).toFixed(1)}%</span></div>`).join("");
+    dom.allocationLegend.innerHTML = chartItems
+      .map((item, index) => {
+        const pct = (item.value / total) * 100;
+        const color = CHART_COLORS[index % CHART_COLORS.length];
+        const isActive = item.key === activeKey;
+        const isPinned = item.key === state.allocationPinnedKey;
+        return `
+          <div class="legend-row${isActive ? " is-active" : ""}" data-allocation-key="${escapeHtml(item.key)}" role="button" tabindex="0" aria-pressed="${isPinned}">
+            <span class="legend-dot" style="background:${color}"></span>
+            <strong>${escapeHtml(item.label)}</strong>
+            <span class="legend-market-value">${formatCurrency(item.value)}</span>
+            <span class="legend-percent">${pct.toFixed(1)}%</span>
+          </div>
+        `;
+      })
+      .join("");
   } else {
-    updateLegendActive(activeKey);
+    updateAllocationLegendActive(activeKey);
   }
 }
 
-function activeAllocationKey(items) {
+function getActiveAllocationKey(items) {
   const key = state.allocationHoverKey || state.allocationPinnedKey;
-  return key && items.some((x) => x.key === key) ? key : null;
+  return key && items.some((item) => item.key === key) ? key : null;
 }
 
-function setAllocationHover(key) {
+function setAllocationHoverKey(key) {
   if (state.allocationHoverKey === key) return;
   state.allocationHoverKey = key;
-  drawChart(false);
+  drawAllocationChart(false);
 }
 
-function toggleAllocationPin(key) {
+function toggleAllocationPinnedKey(key) {
   state.allocationPinnedKey = state.allocationPinnedKey === key ? null : key;
-  drawChart(false);
+  drawAllocationChart(false);
 }
 
-function updateLegendActive(activeKey) {
-  el.legend.querySelectorAll(".legend-row[data-allocation-key]").forEach((row) => {
-    const active = row.dataset.allocationKey === activeKey;
-    const pinned = row.dataset.allocationKey === state.allocationPinnedKey;
-    row.classList.toggle("is-active", active);
-    row.setAttribute("aria-pressed", String(pinned));
+function updateAllocationLegendActive(activeKey) {
+  dom.allocationLegend.querySelectorAll(".legend-row[data-allocation-key]").forEach((row) => {
+    const isActive = row.dataset.allocationKey === activeKey;
+    const isPinned = row.dataset.allocationKey === state.allocationPinnedKey;
+    row.classList.toggle("is-active", isActive);
+    row.setAttribute("aria-pressed", String(isPinned));
   });
 }
 
-function renderInsights(items, total) {
-  if (!el.insights) return;
+function renderAllocationInsights(items, total) {
+  if (!dom.allocationInsights) return;
   if (!total) {
-    el.insights.innerHTML = `<div class="insight-row"><span class="insight-label">配置洞察</span><span class="insight-value">--</span></div>`;
+    dom.allocationInsights.innerHTML = `
+      <div class="insight-row">
+        <span class="insight-label">配置洞察</span>
+        <span class="insight-value">--</span>
+      </div>
+    `;
     return;
   }
+
   const largest = items[0];
-  const largestPct = largest.v / total * 100;
-  const top3Pct = items.slice(0, 3).reduce((sum, x) => sum + x.v, 0) / total * 100;
-  const kinds = items.reduce((map, x) => {
-    const label = KIND[x.p.kind] || "其他";
-    map.set(label, (map.get(label) || 0) + x.v);
-    return map;
+  const largestPercent = (largest.value / total) * 100;
+  const topThreeValue = items.slice(0, 3).reduce((sum, item) => sum + item.value, 0);
+  const topThreePercent = (topThreeValue / total) * 100;
+  const kindTotals = items.reduce((totals, item) => {
+    const label = KIND_LABELS[item.position.kind] || "其他";
+    totals.set(label, (totals.get(label) || 0) + item.value);
+    return totals;
   }, new Map());
-  const kindRows = [...kinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([label, value], i) => {
-    const pct = value / total * 100;
-    const color = COLORS[(i + 3) % COLORS.length];
-    return `<div class="mix-bar"><span class="mix-bar-label">${esc(label)}</span><span class="mix-bar-track"><span class="mix-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></span></span><span class="mix-bar-percent">${pct.toFixed(1)}%</span></div>`;
-  }).join("");
-  el.insights.innerHTML = `<div class="insight-row"><span class="insight-label">最大部位 ${esc(largest.p.symbol)}</span><span class="insight-value">${largestPct.toFixed(1)}%</span></div><div class="insight-row"><span class="insight-label">前三大集中</span><span class="insight-value">${top3Pct.toFixed(1)}%</span></div><div class="insight-row"><span class="insight-label">可計價部位</span><span class="insight-value">${items.length}/${state.positions.length}</span></div><div class="insight-row"><span class="insight-label">${esc(largest.p.symbol)} 市值</span><span class="insight-value">${currency(largest.v, state.baseCurrency, true)}</span></div><div class="mix-bars">${kindRows}</div>`;
+  const kindRows = [...kindTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([label, value], index) => {
+      const pct = (value / total) * 100;
+      const color = CHART_COLORS[(index + 3) % CHART_COLORS.length];
+      return `
+        <div class="mix-bar">
+          <span class="mix-bar-label">${escapeHtml(label)}</span>
+          <span class="mix-bar-track"><span class="mix-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></span></span>
+          <span class="mix-bar-percent">${pct.toFixed(1)}%</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  dom.allocationInsights.innerHTML = `
+    <div class="insight-row">
+      <span class="insight-label">最大部位 ${escapeHtml(largest.position.symbol)}</span>
+      <span class="insight-value">${largestPercent.toFixed(1)}%</span>
+    </div>
+    <div class="insight-row">
+      <span class="insight-label">前三大集中</span>
+      <span class="insight-value">${topThreePercent.toFixed(1)}%</span>
+    </div>
+    <div class="insight-row">
+      <span class="insight-label">可計價部位</span>
+      <span class="insight-value">${items.length}/${state.positions.length}</span>
+    </div>
+    <div class="insight-row">
+      <span class="insight-label">${escapeHtml(largest.position.symbol)} 市值</span>
+      <span class="insight-value">${formatCompactCurrency(largest.value)}</span>
+    </div>
+    <div class="mix-bars">
+      ${kindRows}
+    </div>
+  `;
 }
 
-function allocationItems(items) {
-  const top = items.slice(0, ALLOCATION_LIMIT).map((x) => ({ key: `position:${x.p.id || x.p.symbol}`, label: x.p.symbol, v: x.v }));
-  const other = items.slice(ALLOCATION_LIMIT).reduce((sum, x) => sum + x.v, 0);
-  if (other > 0) top.push({ key: "other", label: "其他", v: other });
-  return top;
+function getAllocationItems(items) {
+  const topItems = items.slice(0, ALLOCATION_LIMIT).map((item) => ({
+    key: `position:${item.position.id || item.position.symbol}`,
+    label: item.position.symbol,
+    value: item.value
+  }));
+  const otherValue = items.slice(ALLOCATION_LIMIT).reduce((sum, item) => sum + item.value, 0);
+  if (otherValue > 0) {
+    topItems.push({ key: "other", label: "其他", value: otherValue });
+  }
+  return topItems;
+}
+
+function updateCurrencyButtons() {
+  dom.baseButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.baseCurrency === state.baseCurrency);
+  });
+}
+
+function formatTime(value) {
+  return new Intl.DateTimeFormat("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(new Date(value));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 async function refreshPrices() {
-  if (state.refreshing) return;
-  state.refreshing = true; state.errors = []; el.refresh.disabled = true; render();
+  if (state.isRefreshing) return;
+  state.isRefreshing = true;
+  state.quoteErrors = [];
+  dom.refreshButton.disabled = true;
+  render();
+
   try {
-    await fetchFx();
-    const next = { ...state.quotes };
-    state.quotes = next;
-    const cryptoIds = [...new Set(state.positions.filter((p) => p.kind === "crypto").map((p) => p.marketSymbol))];
-    const stocks = [...state.positions.filter((p) => p.kind === "us-stock" || p.kind === "tw-stock").reduce((map, p) => {
-      const symbol = p.marketSymbol || p.symbol;
-      if (symbol) map.set(symbol, p.kind);
-      return map;
-    }, new Map())];
-    if (cryptoIds.length) {
-      const missingCrypto = [];
-      try {
-        const cgIds = cryptoIds.filter((id) => !okxCrypto(id));
-        const okxIds = cryptoIds.filter((id) => okxCrypto(id));
-        if (cgIds.length) {
-          try {
-          const data = await getJson(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds.join(",")}&vs_currencies=usd,twd&include_24hr_change=true&include_last_updated_at=true`, true);
-          cgIds.forEach((id) => {
-            const x = data[id], base = state.baseCurrency.toLowerCase();
-            if (!x) return missingCrypto.push(id);
-            next[`crypto:${id}`] = { price: Number(x[base] ?? x.usd), currency: x[base] ? state.baseCurrency : "USD", changePercent: Number(x[`${base}_24h_change`] ?? x.usd_24h_change), source: "CoinGecko" };
-            render();
-          });
-          } catch (error) { missingCrypto.push(...cgIds); console.warn(error); }
-        }
-        await Promise.all(okxIds.map(async (id) => {
-          try { next[`crypto:${id}`] = await okxQuote(id); render(); } catch (error) { missingCrypto.push(id); console.warn(`OKX quote failed for ${id}`, error); }
-        }));
-      } catch (error) { cryptoIds.forEach((id) => { if (!missingCrypto.includes(id)) missingCrypto.push(id); }); console.warn(error); }
-      await mapLimit(missingCrypto, 3, async (id) => {
-        const key = `crypto:${id}`;
-        const kind = stockKindForSymbol(id);
-        if (!kind) {
-          if (!next[key]) state.errors.push(id);
-          return;
-        }
-        try {
-          next[key] = await stockQuote(id.toUpperCase(), kind);
-          render();
-        } catch (error) {
-          if (!next[key]) state.errors.push(id);
-          console.warn(`Stock fallback failed for ${id}`, error);
-        }
-      });
-    }
-    await mapLimit(prioritizeMissing(stocks, next), STOCK_QUOTE_CONCURRENCY, async ([symbol, kind], index) => {
-      const key = `stock:${symbol}`;
-      if (index > 0) await sleep(STOCK_QUOTE_DELAY_MS);
-      try { next[key] = await retry(() => stockQuote(symbol, kind), 2, STOCK_QUOTE_DELAY_MS); render(); } catch (error) { if (!next[key]) state.errors.push(symbol); console.warn(error); render(); }
-    });
-    state.quotes = next; state.lastSync = Date.now(); save();
+    await fetchFxRates();
+    await fetchMarketQuotes();
+    state.lastSync = Date.now();
+    saveState();
   } finally {
-    state.refreshing = false; el.refresh.disabled = false; render();
+    state.isRefreshing = false;
+    dom.refreshButton.disabled = false;
+    render();
   }
 }
 
-function okxCrypto(id) {
-  return OKX_CRYPTO[String(id || "").trim().toLowerCase()] || null;
+async function fetchFxRates() {
+  try {
+    const data = await fetchJson("https://open.er-api.com/v6/latest/USD", { fallbackProxy: false });
+    if (!data?.rates?.TWD) throw new Error("Missing TWD rate");
+    state.fx = {
+      rates: {
+        USD: 1,
+        TWD: Number(data.rates.TWD)
+      },
+      asOf: Date.now(),
+      source: "open.er-api.com"
+    };
+  } catch (error) {
+    state.quoteErrors.push("匯率");
+    if (!state.fx.rates?.TWD) {
+      state.fx = {
+        rates: { USD: 1, TWD: FALLBACK_USD_TWD },
+        asOf: null,
+        source: "fallback"
+      };
+    }
+    console.warn("FX update failed", error);
+  }
 }
 
-async function okxQuote(id) {
-  const cfg = okxCrypto(id);
-  if (!cfg) throw new Error("unknown OKX crypto");
-  const data = await getJson(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(cfg.instId)}`, true, 8000);
-  const t = data?.data?.[0];
-  const price = Number(t?.last);
-  if (data?.code !== "0" || !Number.isFinite(price)) throw new Error("OKX ticker missing price");
-  const open = Number(t.open24h);
-  return { price, currency: "USD", changePercent: open > 0 ? (price - open) / open * 100 : null, source: `OKX ${cfg.instId}`, asOf: Number(t.ts) || Date.now() };
+async function fetchMarketQuotes() {
+  const nextQuotes = { ...state.quotes };
+  state.quotes = nextQuotes;
+  const cryptoIds = [...new Set(state.positions.filter((p) => p.kind === "crypto").map((p) => p.marketSymbol))];
+  const stockPositions = state.positions.filter((p) => p.kind === "us-stock" || p.kind === "tw-stock");
+  const stockTargets = [
+    ...stockPositions.reduce((targets, position) => {
+      const symbol = position.marketSymbol || position.symbol;
+      if (symbol) targets.set(symbol, position.kind);
+      return targets;
+    }, new Map())
+  ];
+
+  if (cryptoIds.length) {
+    try {
+      const cryptoQuotes = await fetchCryptoQuotes(cryptoIds);
+      Object.assign(nextQuotes, cryptoQuotes);
+      render();
+    } catch (error) {
+      console.warn("Crypto quote update failed", error);
+    }
+    const missingCryptoIds = cryptoIds.filter((id) => !nextQuotes[`crypto:${id}`]);
+    await mapWithConcurrency(missingCryptoIds, 3, async (id) => {
+      const key = `crypto:${id}`;
+      const kind = stockKindForSymbol(id);
+      if (!kind) {
+        if (!nextQuotes[key]) state.quoteErrors.push(id);
+        return;
+      }
+      try {
+        nextQuotes[key] = await fetchStockQuote(id.toUpperCase(), kind);
+        render();
+      } catch (error) {
+        if (!nextQuotes[key]) state.quoteErrors.push(id);
+        console.warn(`Stock fallback failed for ${id}`, error);
+        render();
+      }
+    });
+  }
+
+  if (stockTargets.length) {
+    const orderedTargets = prioritizeMissingQuotes(stockTargets, nextQuotes);
+    await mapWithConcurrency(orderedTargets, STOCK_QUOTE_CONCURRENCY, async ([symbol, kind], index) => {
+      const key = `stock:${symbol}`;
+      if (index > 0) await sleep(STOCK_QUOTE_DELAY_MS);
+      try {
+        nextQuotes[key] = await withRetry(() => fetchStockQuote(symbol, kind), 2, STOCK_QUOTE_DELAY_MS);
+      } catch (error) {
+        if (!nextQuotes[key]) state.quoteErrors.push(symbol);
+        console.warn(`Stock quote failed for ${symbol}`, error);
+      }
+      render();
+    });
+  }
+
+  state.quotes = nextQuotes;
 }
 
-async function mapLimit(items, limit, task) {
+async function mapWithConcurrency(items, limit, task) {
   let index = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (index < items.length) {
-      const taskIndex = index++;
-      await task(items[taskIndex], taskIndex);
+      const item = items[index++];
+      await task(item, index - 1);
     }
   });
   await Promise.all(workers);
 }
 
-function prioritizeMissing(items, quotes) {
-  return shuffle(items).sort(([a], [b]) => Number(Boolean(quotes[`stock:${a}`])) - Number(Boolean(quotes[`stock:${b}`])));
+function prioritizeMissingQuotes(targets, quotes) {
+  return shuffleCopy(targets).sort(([left], [right]) => {
+    const leftCached = Boolean(quotes[`stock:${left}`]);
+    const rightCached = Boolean(quotes[`stock:${right}`]);
+    return Number(leftCached) - Number(rightCached);
+  });
 }
 
-function shuffle(items) {
+function shuffleCopy(items) {
   const copy = [...items];
   for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1));
-    [copy[index], copy[swap]] = [copy[swap], copy[index]];
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
   }
   return copy;
 }
 
-async function retry(task, attempts = 2, delay = 1000) {
-  let last = null;
+async function withRetry(task, attempts = 2, delayMs = 1_000) {
+  let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try { return await task(); } catch (error) { last = error; if (attempt < attempts - 1) await sleep(delay * (attempt + 1)); }
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) await sleep(delayMs * (attempt + 1));
+    }
   }
-  throw last;
+  throw lastError;
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchFx() {
-  try {
-    const data = await getJson("https://open.er-api.com/v6/latest/USD");
-    if (!data?.rates?.TWD) throw new Error("missing TWD");
-    state.fx = { USD: 1, TWD: Number(data.rates.TWD) };
-    state.fxAt = Date.now();
-  } catch (error) {
-    state.errors.push("匯率");
-    state.fx = state.fx?.TWD ? state.fx : { USD: 1, TWD: FALLBACK_TWD };
-  }
-}
+async function fetchCryptoQuotes(ids) {
+  const quotes = {};
+  const coinGeckoIds = ids.filter((id) => !getOkxCryptoConfig(id));
+  const okxIds = ids.filter((id) => getOkxCryptoConfig(id));
 
-async function stockQuote(symbol, kind) {
-  if (kind === "tw-stock") {
-    try { return await twse(symbol); } catch (error) { console.warn(`TWSE quote failed for ${symbol}`, error); }
-  }
-  try {
-    return await yahoo(symbol, kind);
-  } catch (error) {
-    console.warn(`Yahoo quote failed for ${symbol}`, error);
-  }
-  return googleFinance(symbol, kind);
-}
-
-async function googleFinance(symbol, kind) {
-  let last = null;
-  for (const target of gfTargets(symbol, kind)) {
+  if (coinGeckoIds.length) {
     try {
-      const path = `${encodeURIComponent(target.symbol)}:${encodeURIComponent(target.exchange)}`;
-      const markdown = await getText(`${GF_BASE}${path}`, 14000);
-      return parseGoogle(markdown, target.symbol, target.exchange, kind);
+      const url = new URL("https://api.coingecko.com/api/v3/simple/price");
+      url.searchParams.set("ids", coinGeckoIds.join(","));
+      url.searchParams.set("vs_currencies", "usd,twd");
+      url.searchParams.set("include_24hr_change", "true");
+      url.searchParams.set("include_last_updated_at", "true");
+      const data = await fetchJson(url.toString(), { fallbackProxy: true });
+
+      coinGeckoIds.forEach((id) => {
+        const item = data[id];
+        if (!item) {
+          return;
+        }
+        const base = state.baseCurrency.toLowerCase();
+        const price = Number(item[base] ?? item.usd);
+        const currency = item[base] ? state.baseCurrency : "USD";
+        quotes[`crypto:${id}`] = {
+          price,
+          currency,
+          changePercent: Number(item[`${base}_24h_change`] ?? item.usd_24h_change),
+          source: "CoinGecko",
+          asOf: item.last_updated_at ? item.last_updated_at * 1000 : Date.now()
+        };
+      });
     } catch (error) {
-      last = error;
+      console.warn("CoinGecko quote update failed", error);
     }
   }
-  throw last || new Error("Google Finance quote not found");
+
+  await Promise.all(
+    okxIds.map(async (id) => {
+      try {
+        quotes[`crypto:${id}`] = await fetchOkxCryptoQuote(id);
+      } catch (error) {
+        console.warn(`OKX quote failed for ${id}`, error);
+      }
+    })
+  );
+
+  return quotes;
 }
 
-function gfTargets(symbol, kind) {
-  const raw = String(symbol || "").trim().toUpperCase().replace(/\s+/g, "");
-  const parsed = parseGfSymbol(raw);
-  if (parsed) return [parsed];
-  const clean = raw.replace(/\.(TW|TWO)$/i, "");
-  if (kind === "tw-stock") return (raw.endsWith(".TWO") ? ["TWO", "TPE"] : ["TPE", "TWO"]).map((exchange) => ({ symbol: clean, exchange }));
-  const hint = GF_HINTS[clean.replace(".B", "")] || GF_HINTS[clean];
-  const exchanges = hint ? [hint, ...GF_US.filter((exchange) => exchange !== hint)] : GF_US;
-  return exchanges.map((exchange) => ({ symbol: clean, exchange }));
+function getOkxCryptoConfig(id) {
+  return OKX_CRYPTO_QUOTES[String(id || "").trim().toLowerCase()] || null;
 }
 
-function parseGfSymbol(value) {
-  const parts = String(value || "").split(":").filter(Boolean);
-  if (parts.length !== 2) return null;
-  const [first, second] = parts;
-  if (isGfExchange(first)) return { symbol: second, exchange: first };
-  if (isGfExchange(second)) return { symbol: first, exchange: second };
-  return null;
-}
-
-function isGfExchange(value) {
-  return ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN", "TPE", "TWO"].includes(value);
-}
-
-function parseGoogle(markdown, symbol, exchange, kind) {
-  const marker = `${symbol}:${exchange}`;
-  const lines = markdown.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const exact = lines.findIndex((line) => line === marker);
-  const markerLine = exact !== -1 ? exact : lines.findIndex((line) => line.includes(marker));
-  if (markerLine === -1) throw new Error(`missing ${marker}`);
-  const priceLine = lines.findIndex((line, index) => index > markerLine && money(line) !== null);
-  if (priceLine === -1) throw new Error(`missing price for ${marker}`);
-  const pctLine = lines.slice(priceLine + 1, priceLine + 10).find((line) => /[+-]?\d+(?:\.\d+)?%/.test(line));
-  const pct = pctLine?.match(/([+-]?\d+(?:\.\d+)?)%/);
-  const currencyLine = lines.find((line) => /\b(USD|TWD)\b/.test(line));
+async function fetchOkxCryptoQuote(id) {
+  const config = getOkxCryptoConfig(id);
+  if (!config) throw new Error("Unknown OKX crypto");
+  const url = `https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(config.instId)}`;
+  const data = await fetchJson(url, { fallbackProxy: true, timeoutMs: 8_000 });
+  const ticker = data?.data?.[0];
+  const price = Number(ticker?.last);
+  if (data?.code !== "0" || !Number.isFinite(price)) throw new Error("OKX ticker missing price");
+  const open24h = Number(ticker.open24h);
   return {
-    price: money(lines[priceLine]),
-    currency: currencyLine?.match(/\b(USD|TWD)\b/)?.[1] || (kind === "tw-stock" ? "TWD" : "USD"),
-    changePercent: pct ? Number(pct[1]) : null,
-    source: `Google Finance ${exchange}`
+    price,
+    currency: "USD",
+    changePercent: open24h > 0 ? ((price - open24h) / open24h) * 100 : null,
+    source: `OKX ${config.instId}`,
+    asOf: Number(ticker.ts) || Date.now()
   };
 }
 
-function money(value) {
+async function fetchStockQuote(symbol, kind) {
+  if (kind === "tw-stock") {
+    try {
+      return await fetchTwseQuote(symbol);
+    } catch (twseError) {
+      console.warn(`TWSE quote failed for ${symbol}`, twseError);
+    }
+  }
+
+  try {
+    return await fetchYahooQuote(symbol, kind);
+  } catch (yahooError) {
+    console.warn(`Yahoo quote failed for ${symbol}`, yahooError);
+  }
+
+  return fetchGoogleFinanceQuote(symbol, kind);
+}
+
+async function fetchGoogleFinanceQuote(symbol, kind) {
+  const targets = getGoogleFinanceTargets(symbol, kind);
+  let lastError = null;
+
+  for (const target of targets) {
+    try {
+      const quotePath = `${encodeURIComponent(target.symbol)}:${encodeURIComponent(target.exchange)}`;
+      const markdown = await fetchText(`${GOOGLE_FINANCE_READER_BASE}${quotePath}`, { timeoutMs: 14_000 });
+      return parseGoogleFinanceQuote(markdown, target.symbol, target.exchange, kind);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("Google Finance quote not found");
+}
+
+function getGoogleFinanceTargets(symbol, kind) {
+  const raw = String(symbol || "").trim().toUpperCase().replace(/\s+/g, "");
+  const parsed = parseGoogleFinanceSymbol(raw);
+  if (parsed) return [parsed];
+
+  const clean = raw.replace(/\.(TW|TWO)$/i, "");
+  if (kind === "tw-stock") {
+    const exchanges = raw.endsWith(".TWO") ? ["TWO", "TPE"] : ["TPE", "TWO"];
+    return exchanges.map((exchange) => ({ symbol: clean, exchange }));
+  }
+
+  const hintedExchange = GOOGLE_FINANCE_EXCHANGE_HINTS[clean.replace(".B", "")] || GOOGLE_FINANCE_EXCHANGE_HINTS[clean];
+  const exchanges = hintedExchange
+    ? [hintedExchange, ...DEFAULT_GOOGLE_US_EXCHANGES.filter((exchange) => exchange !== hintedExchange)]
+    : DEFAULT_GOOGLE_US_EXCHANGES;
+  return exchanges.map((exchange) => ({ symbol: clean, exchange }));
+}
+
+function parseGoogleFinanceSymbol(value) {
+  const parts = String(value || "").split(":").filter(Boolean);
+  if (parts.length !== 2) return null;
+
+  const [first, second] = parts;
+  if (isGoogleExchange(first)) return { symbol: second, exchange: first };
+  if (isGoogleExchange(second)) return { symbol: first, exchange: second };
+  return null;
+}
+
+function isGoogleExchange(value) {
+  return ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN", "TPE", "TWO"].includes(value);
+}
+
+function parseGoogleFinanceQuote(markdown, symbol, exchange, kind) {
+  const marker = `${symbol}:${exchange}`;
+  const lines = markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const exactMarkerLine = lines.findIndex((line) => line === marker);
+  const markerLine = exactMarkerLine !== -1
+    ? exactMarkerLine
+    : lines.findIndex((line) => line.includes(marker));
+  if (markerLine === -1) throw new Error(`Missing ${marker}`);
+
+  const priceLine = lines.findIndex((line, index) => index > markerLine && parseMoneyValue(line) !== null);
+  if (priceLine === -1) throw new Error(`Missing price for ${marker}`);
+
+  const price = parseMoneyValue(lines[priceLine]);
+  const percentLine = lines.slice(priceLine + 1, priceLine + 10).find((line) => /[+-]?\d+(?:\.\d+)?%/.test(line));
+  const percentMatch = percentLine?.match(/([+-]?\d+(?:\.\d+)?)%/);
+  const currencyLine = lines.find((line) => /\b(USD|TWD)\b/.test(line));
+  const currency = currencyLine?.match(/\b(USD|TWD)\b/)?.[1] || (kind === "tw-stock" ? "TWD" : "USD");
+
+  return {
+    price,
+    currency,
+    changePercent: percentMatch ? Number(percentMatch[1]) : null,
+    source: `Google Finance ${exchange}`,
+    asOf: Date.now()
+  };
+}
+
+function parseMoneyValue(value) {
   const match = String(value || "").match(/^(?:US\$|NT\$|\$)?\s*([0-9][0-9,]*(?:\.\d+)?)$/);
   if (!match) return null;
   const price = Number(match[1].replaceAll(",", ""));
   return Number.isFinite(price) ? price : null;
 }
 
-async function twse(symbol) {
+async function fetchTwseQuote(symbol) {
   const clean = String(symbol || "").trim().toUpperCase().replace(/\.(TW|TWO)$/i, "");
   const exchange = String(symbol || "").toUpperCase().endsWith(".TWO") ? "otc" : "tse";
-  const data = await getJson(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exchange}_${clean}.tw&json=1&delay=0`, true, 5000);
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exchange}_${clean}.tw&json=1&delay=0`;
+  const data = await fetchJson(url, { fallbackProxy: true, timeoutMs: 5_000 });
   const item = data?.msgArray?.[0];
-  if (!item) throw new Error("no TWSE quote");
-  const price = firstNumber(item.z, item.pz, item.y);
-  const prev = firstNumber(item.y);
-  if (!Number.isFinite(price)) throw new Error("no TWSE price");
-  return { price, currency: "TWD", changePercent: prev > 0 ? (price - prev) / prev * 100 : null, source: "TWSE" };
+  if (!item) throw new Error("Missing TWSE quote");
+
+  const price = firstFiniteNumber(item.z, item.pz, item.y);
+  const previousClose = firstFiniteNumber(item.y);
+  if (!Number.isFinite(price)) throw new Error("Missing TWSE price");
+
+  return {
+    price,
+    currency: "TWD",
+    changePercent: Number.isFinite(previousClose) && previousClose > 0
+      ? ((price - previousClose) / previousClose) * 100
+      : null,
+    source: "TWSE",
+    asOf: Number(item.tlong) || Date.now()
+  };
 }
 
-function firstNumber(...values) {
+function firstFiniteNumber(...values) {
   for (const value of values) {
-    const n = Number(String(value ?? "").replaceAll(",", ""));
-    if (Number.isFinite(n)) return n;
+    const number = Number(String(value ?? "").replaceAll(",", ""));
+    if (Number.isFinite(number)) return number;
   }
   return NaN;
 }
 
-function yahooSymbol(symbol, kind) {
+function getYahooSymbol(symbol, kind) {
   const raw = String(symbol || "").trim().toUpperCase().replace(/\s+/g, "");
   if (kind === "tw-stock") {
     const clean = raw.replace(/\.(TW|TWO)$/i, "");
@@ -615,171 +1249,590 @@ function yahooSymbol(symbol, kind) {
   return raw.replace(".B", "-B").replace(/\./g, "-");
 }
 
-async function yahoo(symbol, kind) {
-  const ySymbol = yahooSymbol(symbol, kind);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ySymbol)}?range=1d&interval=1m`;
-  const data = await getJson(url, true, 5000);
+async function fetchYahooQuote(symbol, kind) {
+  const yahooSymbol = getYahooSymbol(symbol, kind);
+  const encoded = encodeURIComponent(yahooSymbol);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encoded}?range=1d&interval=1m`;
+  const data = await fetchJson(url, { fallbackProxy: true, timeoutMs: 5_000 });
   const error = data?.chart?.error;
   if (error) throw new Error(error.description || "Yahoo Finance error");
-  const meta = data?.chart?.result?.[0]?.meta;
-  if (!meta) throw new Error("no quote");
+
+  const result = data?.chart?.result?.[0];
+  const meta = result?.meta;
+  if (!meta) throw new Error("Missing quote metadata");
+
   const price = Number(meta.regularMarketPrice ?? meta.previousClose ?? meta.chartPreviousClose);
-  if (!Number.isFinite(price)) throw new Error("no price");
-  const prev = Number(meta.chartPreviousClose ?? meta.previousClose);
-  return { price, currency: meta.currency || (ySymbol.endsWith(".TW") || ySymbol.endsWith(".TWO") ? "TWD" : "USD"), changePercent: prev > 0 ? (price - prev) / prev * 100 : null, source: "Yahoo Finance" };
+  if (!Number.isFinite(price)) throw new Error("Missing market price");
+
+  const previousClose = Number(meta.chartPreviousClose ?? meta.previousClose);
+  const changePercent = Number.isFinite(previousClose) && previousClose > 0
+    ? ((price - previousClose) / previousClose) * 100
+    : null;
+
+  return {
+    price,
+    currency: meta.currency || (yahooSymbol.endsWith(".TW") || yahooSymbol.endsWith(".TWO") ? "TWD" : "USD"),
+    changePercent,
+    source: "Yahoo Finance",
+    asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now()
+  };
 }
 
-async function getText(url, timeout = 12000) {
+async function fetchText(url, options = {}) {
+  const { timeoutMs = 12_000 } = options;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { cache: "no-store", signal: controller.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.text();
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function getJson(url, proxy = false, timeout = 12000) {
+async function fetchJson(url, options = {}) {
+  const { fallbackProxy = false, timeoutMs = 12_000 } = options;
   try {
-    return await getJsonDirect(url, timeout);
+    return await fetchJsonDirect(url, timeoutMs);
   } catch (error) {
-    if (!proxy) throw error;
+    if (!fallbackProxy) throw error;
     try {
-      return jsonFromText(await getText(`https://r.jina.ai/http://${url}`, timeout));
+      return parseJsonFromText(await fetchText(`https://r.jina.ai/http://${url}`, { timeoutMs }));
     } catch (readerError) {
-      return getJsonDirect(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, timeout);
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      return fetchJsonDirect(proxyUrl, timeoutMs);
     }
   }
 }
 
-function jsonFromText(text) {
+function parseJsonFromText(text) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) throw new Error("no JSON payload");
+  if (start === -1 || end === -1 || end <= start) throw new Error("Missing JSON payload");
   return JSON.parse(text.slice(start, end + 1));
 }
 
-async function getJsonDirect(url, timeout) {
+async function fetchJsonDirect(url, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { cache: "no-store", signal: controller.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
-function submit(event) {
+function handleSubmit(event) {
   event.preventDefault();
   try {
-    const old = state.positions.find((p) => p.id === el.editingId.value);
-    const p = normalize({ kind: el.kind.value, symbol: el.symbol.value, name: el.name.value, quantity: el.qty.value, averageCost: el.avg.value, costCurrency: el.costCurrency.value, manualPrice: el.manualPrice.value, manualCurrency: el.manualCurrency.value }, old?.id, old?.createdAt);
-    state.positions = old ? state.positions.map((x) => x.id === old.id ? p : x) : state.positions.concat(p);
-    save(); resetForm(); render(); refreshPrices();
-  } catch (error) { alert(error.message || "無法儲存資產"); }
+    const editingId = dom.editingId.value;
+    const existing = state.positions.find((position) => position.id === editingId);
+    const position = normalizeDraft(
+      {
+        kind: dom.assetKind.value,
+        symbol: dom.assetSymbol.value,
+        name: dom.assetName.value,
+        quantity: dom.assetQuantity.value,
+        averageCost: dom.assetAverageCost.value,
+        costCurrency: dom.costCurrency.value,
+        manualPrice: dom.manualPrice.value,
+        manualCurrency: dom.manualCurrency.value
+      },
+      editingId || uid(),
+      existing?.createdAt || new Date().toISOString()
+    );
+
+    if (editingId) {
+      state.positions = state.positions.map((item) => (item.id === editingId ? position : item));
+    } else {
+      state.positions.push(position);
+    }
+
+    saveState();
+    resetForm();
+    render();
+    refreshPrices();
+  } catch (error) {
+    window.alert(error.message || "無法儲存資產");
+  }
 }
 
-function edit(id) {
-  const p = state.positions.find((x) => x.id === id);
-  if (!p) return;
-  el.editingId.value = p.id; el.kind.value = p.kind; el.symbol.value = p.kind === "crypto" ? p.symbol : p.marketSymbol; el.name.value = p.name;
-  el.qty.value = p.quantity; el.avg.value = p.averageCost; el.costCurrency.value = p.costCurrency; el.manualPrice.value = p.manualPrice ?? ""; el.manualCurrency.value = p.manualCurrency || "TWD";
-  el.formTitle.textContent = "編輯資產"; el.submit.textContent = "更新資產"; el.cancel.classList.remove("is-hidden"); updateKind(); el.symbol.focus();
+function editPosition(id) {
+  const position = state.positions.find((item) => item.id === id);
+  if (!position) return;
+  dom.editingId.value = position.id;
+  dom.assetKind.value = position.kind;
+  dom.assetSymbol.value = position.kind === "crypto" ? position.symbol : position.marketSymbol || position.symbol;
+  dom.assetName.value = position.name;
+  dom.assetQuantity.value = position.quantity;
+  dom.assetAverageCost.value = position.averageCost;
+  dom.costCurrency.value = position.costCurrency;
+  dom.manualPrice.value = position.manualPrice ?? "";
+  dom.manualCurrency.value = position.manualCurrency || "TWD";
+  dom.formTitle.textContent = "編輯資產";
+  dom.submitAssetButton.textContent = "更新資產";
+  dom.cancelEditButton.classList.remove("is-hidden");
+  updateKindMode();
+  dom.assetSymbol.focus();
 }
 
-function remove(id) {
-  const p = state.positions.find((x) => x.id === id);
-  if (!p || !confirm(`刪除 ${p.name}？`)) return;
-  state.positions = state.positions.filter((x) => x.id !== id);
-  save(); render();
+function deletePosition(id) {
+  const position = state.positions.find((item) => item.id === id);
+  if (!position) return;
+  if (!window.confirm(`刪除 ${position.name}？`)) return;
+  state.positions = state.positions.filter((item) => item.id !== id);
+  delete state.quotes[quoteKey(position)];
+  saveState();
+  render();
 }
 
 function resetForm() {
-  el.form.reset(); el.editingId.value = ""; el.kind.value = "crypto"; el.costCurrency.value = "QUOTE";
-  el.formTitle.textContent = "新增資產"; el.submit.textContent = "新增資產"; el.cancel.classList.add("is-hidden"); updateKind();
+  dom.form.reset();
+  dom.editingId.value = "";
+  dom.assetKind.value = "crypto";
+  dom.costCurrency.value = "QUOTE";
+  dom.formTitle.textContent = "新增資產";
+  dom.submitAssetButton.textContent = "新增資產";
+  dom.cancelEditButton.classList.add("is-hidden");
+  updateKindMode();
 }
 
-function updateKind() {
-  const manual = el.kind.value === "manual";
-  el.form.classList.toggle("manual-mode", manual);
-  el.manualPrice.required = manual;
-  el.symbol.placeholder = el.kind.value === "tw-stock" ? "2330 或 0050.TW" : el.kind.value === "us-stock" ? "AAPL, TSLA, NVDA" : manual ? "現金、基金、房產" : "BTC, ETH, bitcoin";
+function updateKindMode() {
+  const kind = dom.assetKind.value;
+  dom.form.classList.toggle("manual-mode", kind === "manual");
+  dom.manualPrice.required = kind === "manual";
+  if (kind === "crypto") {
+    dom.assetSymbol.placeholder = "BTC, ETH, bitcoin";
+    if (!dom.editingId.value) dom.costCurrency.value = "QUOTE";
+  }
+  if (kind === "us-stock") {
+    dom.assetSymbol.placeholder = "AAPL, TSLA, NVDA";
+    if (!dom.editingId.value) dom.costCurrency.value = "QUOTE";
+  }
+  if (kind === "tw-stock") {
+    dom.assetSymbol.placeholder = "2330 或 0050.TW";
+    if (!dom.editingId.value) dom.costCurrency.value = "QUOTE";
+  }
+  if (kind === "manual") {
+    dom.assetSymbol.placeholder = "現金、基金、房產";
+    if (!dom.editingId.value) {
+      dom.costCurrency.value = "TWD";
+      dom.manualCurrency.value = "TWD";
+    }
+  }
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), app: "wealthtrack", version: 1, baseCurrency: state.baseCurrency, positions: state.positions }, null, 2)], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `wealthtrack-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+function exportPortfolio() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    app: "wealthtrack",
+    version: 1,
+    baseCurrency: state.baseCurrency,
+    positions: state.positions
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `wealthtrack-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
-function importData(file) {
+function importPortfolio(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const data = JSON.parse(reader.result);
-      state.positions = (data.positions || []).map((p) => normalize(p, p.id, p.createdAt));
-      if (data.baseCurrency === "USD" || data.baseCurrency === "TWD") state.baseCurrency = data.baseCurrency;
-      save(); resetForm(); render(); refreshPrices();
-    } catch (error) { alert("匯入失敗"); }
+      const payload = JSON.parse(String(reader.result || "{}"));
+      const positions = Array.isArray(payload.positions) ? payload.positions : [];
+      if (!positions.length) throw new Error("檔案裡沒有資產資料");
+      state.positions = positions.map(normalizeImportedPosition).filter(Boolean);
+      if (payload.baseCurrency === "USD" || payload.baseCurrency === "TWD") {
+        state.baseCurrency = payload.baseCurrency;
+      }
+      saveState();
+      resetForm();
+      render();
+      refreshPrices();
+    } catch (error) {
+      window.alert(error.message || "匯入失敗");
+    } finally {
+      dom.importFile.value = "";
+    }
   };
   reader.readAsText(file);
 }
 
-function time(value) {
-  return new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value));
+function getCloudSettingsFromForm() {
+  state.cloud.token = dom.syncToken.value.trim();
+  state.cloud.gistId = dom.syncGistId.value.trim();
+  state.cloud.autoSync = dom.syncAuto.checked;
 }
 
-function esc(value) {
-  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+function portfolioSyncData() {
+  return {
+    baseCurrency: state.baseCurrency,
+    sortMode: state.sortMode,
+    positions: state.positions
+  };
 }
 
-el.form.addEventListener("submit", submit);
-el.kind.addEventListener("change", updateKind);
-el.refresh.addEventListener("click", refreshPrices);
-el.cancel.addEventListener("click", resetForm);
-el.export.addEventListener("click", exportData);
-el.import.addEventListener("click", () => el.importFile.click());
-el.importFile.addEventListener("change", () => importData(el.importFile.files[0]));
-el.search.addEventListener("input", renderRows);
-el.sortButtons.forEach((button) => button.addEventListener("click", () => setSort(button.dataset.sortField)));
-el.baseButtons.forEach((b) => b.addEventListener("click", () => { state.baseCurrency = b.dataset.baseCurrency; save(); render(); refreshPrices(); }));
-el.rows.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-  if (button.dataset.action === "edit") edit(button.dataset.id);
-  if (button.dataset.action === "delete") remove(button.dataset.id);
-});
-el.legend.addEventListener("pointerover", (event) => {
-  const row = event.target.closest(".legend-row[data-allocation-key]");
-  if (row) setAllocationHover(row.dataset.allocationKey);
-});
-el.legend.addEventListener("pointerleave", () => setAllocationHover(null));
-el.legend.addEventListener("click", (event) => {
-  const row = event.target.closest(".legend-row[data-allocation-key]");
-  if (row) toggleAllocationPin(row.dataset.allocationKey);
-});
-el.legend.addEventListener("focusin", (event) => {
-  const row = event.target.closest(".legend-row[data-allocation-key]");
-  if (row) setAllocationHover(row.dataset.allocationKey);
-});
-el.legend.addEventListener("focusout", () => setAllocationHover(null));
-el.legend.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  const row = event.target.closest(".legend-row[data-allocation-key]");
-  if (!row) return;
-  event.preventDefault();
-  toggleAllocationPin(row.dataset.allocationKey);
-});
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && state.positions.length && (!state.lastSync || Date.now() - state.lastSync > REFRESH_MS)) refreshPrices();
-});
-window.addEventListener("resize", drawChart);
-if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js?v=19").catch(console.warn);
-updateKind();
+function portfolioSyncHash() {
+  return JSON.stringify(portfolioSyncData());
+}
+
+function buildCloudPayload() {
+  return {
+    app: "wealthtrack",
+    version: 2,
+    updatedAt: new Date().toISOString(),
+    ...portfolioSyncData()
+  };
+}
+
+function setCloudStatus(message, busy = false) {
+  state.cloud.status = message;
+  state.cloud.busy = busy;
+  renderCloudSync();
+}
+
+function cloudStatusText() {
+  if (state.cloud.status) return state.cloud.status;
+  if (!state.cloud.token) return "尚未設定";
+  if (state.cloud.lastPushedAt) return `已上傳 ${formatTime(state.cloud.lastPushedAt)}`;
+  if (state.cloud.lastPulledAt) return `已下載 ${formatTime(state.cloud.lastPulledAt)}`;
+  if (state.cloud.gistId) return "已連線";
+  return "尚未建立同步檔";
+}
+
+function renderCloudSync() {
+  if (!dom.syncToken) return;
+  if (document.activeElement !== dom.syncToken) dom.syncToken.value = state.cloud.token || "";
+  if (document.activeElement !== dom.syncGistId) dom.syncGistId.value = state.cloud.gistId || "";
+  dom.syncAuto.checked = Boolean(state.cloud.autoSync);
+  dom.cloudSyncStatus.textContent = state.cloud.busy ? "雲端同步中..." : cloudStatusText();
+
+  const hasToken = Boolean(state.cloud.token || dom.syncToken.value.trim());
+  dom.cloudUploadButton.disabled = state.cloud.busy || !hasToken;
+  dom.cloudDownloadButton.disabled = state.cloud.busy || !hasToken;
+  dom.syncSaveButton.disabled = state.cloud.busy;
+}
+
+function scheduleAutoSync() {
+  if (!state.cloud.autoSync || !state.cloud.token || state.cloud.busy) return;
+  const hash = portfolioSyncHash();
+  if (hash === state.cloud.lastHash) return;
+  clearTimeout(autoSyncTimer);
+  autoSyncTimer = setTimeout(() => {
+    uploadCloudSync({ silent: true }).catch((error) => {
+      console.warn("Auto sync failed", error);
+      setCloudStatus("自動同步失敗");
+    });
+  }, AUTO_SYNC_DEBOUNCE_MS);
+}
+
+async function githubRequest(path, options = {}) {
+  const token = state.cloud.token || dom.syncToken.value.trim();
+  if (!token) throw new Error("請先輸入 GitHub token");
+  const response = await fetch(`${GITHUB_API_BASE}${path}`, {
+    method: options.method || "GET",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(data?.message || `GitHub HTTP ${response.status}`);
+  return data;
+}
+
+async function findCloudGist() {
+  if (state.cloud.gistId) {
+    return githubRequest(`/gists/${encodeURIComponent(state.cloud.gistId)}`);
+  }
+
+  for (let page = 1; page <= 3; page += 1) {
+    const gists = await githubRequest(`/gists?per_page=100&page=${page}`);
+    const found = Array.isArray(gists)
+      ? gists.find((gist) => gist.files && Object.prototype.hasOwnProperty.call(gist.files, SYNC_FILE_NAME))
+      : null;
+    if (found) {
+      state.cloud.gistId = found.id;
+      return githubRequest(`/gists/${encodeURIComponent(found.id)}`);
+    }
+    if (!Array.isArray(gists) || gists.length < 100) break;
+  }
+
+  return null;
+}
+
+async function ensureCloudGist() {
+  const existing = await findCloudGist();
+  if (existing) return existing;
+  const payload = buildCloudPayload();
+  return githubRequest("/gists", {
+    method: "POST",
+    body: {
+      description: SYNC_GIST_DESCRIPTION,
+      public: false,
+      files: {
+        [SYNC_FILE_NAME]: {
+          content: JSON.stringify(payload, null, 2)
+        }
+      }
+    }
+  });
+}
+
+async function readCloudPayload(gist) {
+  const file = gist?.files?.[SYNC_FILE_NAME];
+  if (!file) throw new Error("找不到同步檔");
+  let content = file.content;
+  if (!content && file.raw_url) {
+    const response = await fetch(file.raw_url, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${state.cloud.token}` }
+    });
+    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
+    content = await response.text();
+  }
+  const payload = JSON.parse(content || "{}");
+  if (payload.app !== "wealthtrack" || !Array.isArray(payload.positions)) {
+    throw new Error("雲端同步檔格式不正確");
+  }
+  return payload;
+}
+
+function applyCloudPayload(payload) {
+  state.positions = payload.positions.map(normalizeImportedPosition).filter(Boolean);
+  if (payload.baseCurrency === "USD" || payload.baseCurrency === "TWD") {
+    state.baseCurrency = payload.baseCurrency;
+  }
+  if (typeof payload.sortMode === "string") {
+    state.sortMode = payload.sortMode;
+  }
+  state.cloud.lastPulledAt = Date.now();
+  state.cloud.lastRemoteUpdatedAt = payload.updatedAt || null;
+  state.cloud.lastHash = portfolioSyncHash();
+  saveState({ sync: false });
+  resetForm();
+  render();
+  refreshPrices();
+}
+
+async function uploadCloudSync(options = {}) {
+  const { silent = false } = options;
+  getCloudSettingsFromForm();
+  setCloudStatus("雲端同步中...", true);
+  try {
+    const gist = await ensureCloudGist();
+    state.cloud.gistId = gist.id;
+    const payload = buildCloudPayload();
+    await githubRequest(`/gists/${encodeURIComponent(gist.id)}`, {
+      method: "PATCH",
+      body: {
+        description: SYNC_GIST_DESCRIPTION,
+        files: {
+          [SYNC_FILE_NAME]: {
+            content: JSON.stringify(payload, null, 2)
+          }
+        }
+      }
+    });
+    state.cloud.lastPushedAt = Date.now();
+    state.cloud.lastRemoteUpdatedAt = payload.updatedAt;
+    state.cloud.lastHash = portfolioSyncHash();
+    state.cloud.status = silent ? "已自動上傳" : "已上傳雲端";
+    saveState({ sync: false });
+    renderCloudSync();
+  } catch (error) {
+    state.cloud.status = "上傳失敗";
+    renderCloudSync();
+    if (!silent) window.alert(error.message || "上傳雲端失敗");
+    throw error;
+  } finally {
+    state.cloud.busy = false;
+    renderCloudSync();
+  }
+}
+
+async function downloadCloudSync(options = {}) {
+  const { silent = false, overwrite = true } = options;
+  getCloudSettingsFromForm();
+  setCloudStatus("雲端同步中...", true);
+  try {
+    const gist = await findCloudGist();
+    if (!gist) throw new Error("找不到同步檔，請先在有資料的裝置按上傳雲端");
+    state.cloud.gistId = gist.id;
+    const payload = await readCloudPayload(gist);
+    const remoteTime = payload.updatedAt ? Date.parse(payload.updatedAt) : 0;
+    const lastRemoteTime = state.cloud.lastRemoteUpdatedAt ? Date.parse(state.cloud.lastRemoteUpdatedAt) : 0;
+    const localChanged = Boolean(state.positions.length) && state.cloud.lastHash && portfolioSyncHash() !== state.cloud.lastHash;
+
+    if (!overwrite && state.positions.length && !state.cloud.lastHash) {
+      state.cloud.status = "請手動選擇上傳或下載";
+      saveState({ sync: false });
+      renderCloudSync();
+      return;
+    }
+    if (!overwrite && localChanged && remoteTime > lastRemoteTime) {
+      state.cloud.status = "雲端與本機都有變更";
+      saveState({ sync: false });
+      renderCloudSync();
+      return;
+    }
+    if (!overwrite && remoteTime <= lastRemoteTime && state.positions.length) {
+      state.cloud.status = "已是最新";
+      saveState({ sync: false });
+      renderCloudSync();
+      return;
+    }
+
+    applyCloudPayload(payload);
+    state.cloud.status = silent ? "已自動下載" : "已下載雲端";
+    saveState({ sync: false });
+    renderCloudSync();
+  } catch (error) {
+    state.cloud.status = "下載失敗";
+    renderCloudSync();
+    if (!silent) window.alert(error.message || "下載雲端失敗");
+    throw error;
+  } finally {
+    state.cloud.busy = false;
+    renderCloudSync();
+  }
+}
+
+async function saveCloudSettings() {
+  getCloudSettingsFromForm();
+  state.cloud.status = state.cloud.token ? "同步設定已儲存" : "尚未設定";
+  saveState({ sync: false });
+  renderCloudSync();
+  if (state.cloud.autoSync && state.cloud.token) {
+    downloadCloudSync({ silent: true, overwrite: false }).catch((error) => {
+      console.warn("Initial cloud sync failed", error);
+    });
+  }
+}
+
+function bindEvents() {
+  dom.form.addEventListener("submit", handleSubmit);
+  dom.assetKind.addEventListener("change", updateKindMode);
+  dom.refreshButton.addEventListener("click", refreshPrices);
+  dom.cancelEditButton.addEventListener("click", resetForm);
+  dom.exportButton.addEventListener("click", exportPortfolio);
+  dom.importButton.addEventListener("click", () => dom.importFile.click());
+  dom.importFile.addEventListener("change", () => importPortfolio(dom.importFile.files[0]));
+  dom.syncSaveButton.addEventListener("click", saveCloudSettings);
+  dom.cloudUploadButton.addEventListener("click", () => uploadCloudSync());
+  dom.cloudDownloadButton.addEventListener("click", () => downloadCloudSync());
+  dom.syncAuto.addEventListener("change", saveCloudSettings);
+  dom.syncToken.addEventListener("input", renderCloudSync);
+  dom.syncGistId.addEventListener("input", renderCloudSync);
+  dom.positionSearch.addEventListener("input", renderRows);
+  dom.sortButtons.forEach((button) => {
+    button.addEventListener("click", () => setSortField(button.dataset.sortField));
+  });
+
+  dom.baseButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.baseCurrency = button.dataset.baseCurrency;
+      saveState();
+      render();
+      refreshPrices();
+    });
+  });
+
+  dom.positionsBody.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const id = button.dataset.id;
+    if (button.dataset.action === "edit") editPosition(id);
+    if (button.dataset.action === "delete") deletePosition(id);
+  });
+
+  dom.allocationLegend.addEventListener("pointerover", (event) => {
+    const row = event.target.closest(".legend-row[data-allocation-key]");
+    if (!row) return;
+    setAllocationHoverKey(row.dataset.allocationKey);
+  });
+
+  dom.allocationLegend.addEventListener("pointerleave", () => {
+    setAllocationHoverKey(null);
+  });
+
+  dom.allocationLegend.addEventListener("click", (event) => {
+    const row = event.target.closest(".legend-row[data-allocation-key]");
+    if (!row) return;
+    toggleAllocationPinnedKey(row.dataset.allocationKey);
+  });
+
+  dom.allocationLegend.addEventListener("focusin", (event) => {
+    const row = event.target.closest(".legend-row[data-allocation-key]");
+    if (!row) return;
+    setAllocationHoverKey(row.dataset.allocationKey);
+  });
+
+  dom.allocationLegend.addEventListener("focusout", () => {
+    setAllocationHoverKey(null);
+  });
+
+  dom.allocationLegend.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest(".legend-row[data-allocation-key]");
+    if (!row) return;
+    event.preventDefault();
+    toggleAllocationPinnedKey(row.dataset.allocationKey);
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    const stale = !state.lastSync || Date.now() - state.lastSync > REFRESH_MS;
+    if (document.visibilityState === "visible" && stale && state.positions.length) refreshPrices();
+  });
+
+  window.addEventListener("resize", drawAllocationChart);
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  if (location.protocol === "file:") return;
+  navigator.serviceWorker.register("./service-worker.js?v=20").catch((error) => {
+    console.warn("Service worker registration failed", error);
+  });
+}
+
+loadState();
+bindEvents();
+updateKindMode();
 render();
-if (state.positions.length) refreshPrices();
-setInterval(() => { if (state.positions.length && document.visibilityState === "visible") refreshPrices(); }, REFRESH_MS);
+registerServiceWorker();
+
+if (state.cloud.autoSync && state.cloud.token) {
+  downloadCloudSync({ silent: true, overwrite: false }).catch((error) => {
+    console.warn("Startup cloud sync failed", error);
+  });
+}
+
+if (state.positions.length) {
+  refreshPrices();
+}
+
+setInterval(() => {
+  if (state.positions.length && document.visibilityState === "visible") refreshPrices();
+}, REFRESH_MS);
