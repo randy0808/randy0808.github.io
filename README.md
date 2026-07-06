@@ -15,6 +15,6 @@
    - 美股與台股：Google Finance reader，失敗時保留上次可用報價。
    - USD/TWD 匯率：open.er-api.com，失敗時使用備用匯率。
 
-資料會存在瀏覽器的 localStorage。跨裝置可用「雲端同步」連到 GitHub 私密 Gist，也可用「匯出 / 匯入」備份 JSON。
+資料會存在瀏覽器的 localStorage。跨裝置可在「主選單 > Token 設定」連到 GitHub 私密 Gist，也可用「匯出 / 匯入」備份 JSON。
 
 此工具僅用於個人資產記錄與估值，不是投資建議。
