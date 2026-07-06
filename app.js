@@ -147,6 +147,10 @@ const dom = {
   closeMenuButton: document.querySelector("#closeMenuButton"),
   appMenu: document.querySelector("#appMenu"),
   menuBackdrop: document.querySelector("#menuBackdrop"),
+  menuMainPanel: document.querySelector("#menuMainPanel"),
+  tokenSettingsButton: document.querySelector("#tokenSettingsButton"),
+  tokenSettingsPanel: document.querySelector("#tokenSettingsPanel"),
+  backToMenuButton: document.querySelector("#backToMenuButton"),
   baseButtons: document.querySelectorAll("[data-base-currency]"),
   form: document.querySelector("#assetForm"),
   formTitle: document.querySelector("#formTitle"),
@@ -173,6 +177,7 @@ const dom = {
   syncClearTokenButton: document.querySelector("#syncClearTokenButton"),
   cloudSyncStatus: document.querySelector("#cloudSyncStatus"),
   syncTokenState: document.querySelector("#syncTokenState"),
+  tokenSettingsSummary: document.querySelector("#tokenSettingsSummary"),
   allocationTotal: document.querySelector("#allocationTotal"),
   allocationChart: document.querySelector("#allocationChart"),
   allocationInsights: document.querySelector("#allocationInsights"),
@@ -1404,7 +1409,7 @@ function deletePosition(id) {
 function resetForm() {
   dom.form.reset();
   dom.editingId.value = "";
-  dom.assetKind.value = "crypto";
+  dom.assetKind.value = "us-stock";
   dom.costCurrency.value = "QUOTE";
   dom.formTitle.textContent = "新增資產";
   dom.submitAssetButton.textContent = "新增資產";
@@ -1533,7 +1538,9 @@ function renderCloudSync() {
   if (document.activeElement !== dom.syncGistId) dom.syncGistId.value = state.cloud.gistId || "";
   dom.syncAuto.checked = Boolean(state.cloud.autoSync);
   dom.cloudSyncStatus.textContent = state.cloud.busy ? "雲端同步中..." : cloudStatusText();
-  dom.syncTokenState.textContent = state.cloud.token ? "Token 已設定" : "Token 尚未設定";
+  const tokenStatus = state.cloud.token ? "Token 已設定" : "Token 尚未設定";
+  dom.syncTokenState.textContent = tokenStatus;
+  dom.tokenSettingsSummary.textContent = `${tokenStatus}${state.cloud.autoSync ? "，自動同步開啟" : ""}`;
 
   const hasToken = Boolean(state.cloud.token || dom.syncToken.value.trim());
   dom.cloudUploadButton.disabled = state.cloud.busy || !hasToken;
@@ -1744,10 +1751,22 @@ async function saveCloudSettings() {
   }
 }
 
+function showMenuPanel(panel) {
+  const showTokenSettings = panel === "token";
+  dom.menuMainPanel.classList.toggle("is-hidden", showTokenSettings);
+  dom.tokenSettingsPanel.classList.toggle("is-hidden", !showTokenSettings);
+}
+
+function openTokenSettings() {
+  showMenuPanel("token");
+  renderCloudSync();
+}
+
 function openMenu() {
   dom.appMenu.classList.remove("is-hidden");
   dom.menuBackdrop.classList.remove("is-hidden");
   dom.menuButton.setAttribute("aria-expanded", "true");
+  showMenuPanel("main");
   renderCloudSync();
 }
 
@@ -1755,6 +1774,7 @@ function closeMenu() {
   dom.appMenu.classList.add("is-hidden");
   dom.menuBackdrop.classList.add("is-hidden");
   dom.menuButton.setAttribute("aria-expanded", "false");
+  showMenuPanel("main");
 }
 
 function clearCloudToken() {
@@ -1775,6 +1795,8 @@ function bindEvents() {
   dom.menuButton.addEventListener("click", openMenu);
   dom.closeMenuButton.addEventListener("click", closeMenu);
   dom.menuBackdrop.addEventListener("click", closeMenu);
+  dom.tokenSettingsButton.addEventListener("click", openTokenSettings);
+  dom.backToMenuButton.addEventListener("click", () => showMenuPanel("main"));
   dom.cancelEditButton.addEventListener("click", resetForm);
   dom.exportButton.addEventListener("click", exportPortfolio);
   dom.importButton.addEventListener("click", () => dom.importFile.click());
@@ -1857,7 +1879,7 @@ function bindEvents() {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (location.protocol === "file:") return;
-  navigator.serviceWorker.register("./service-worker.js?v=21").catch((error) => {
+  navigator.serviceWorker.register("./service-worker.js?v=22").catch((error) => {
     console.warn("Service worker registration failed", error);
   });
 }
