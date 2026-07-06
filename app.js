@@ -143,6 +143,10 @@ const dom = {
   quoteHealth: document.querySelector("#quoteHealth"),
   fxStatus: document.querySelector("#fxStatus"),
   refreshButton: document.querySelector("#refreshButton"),
+  menuButton: document.querySelector("#menuButton"),
+  closeMenuButton: document.querySelector("#closeMenuButton"),
+  appMenu: document.querySelector("#appMenu"),
+  menuBackdrop: document.querySelector("#menuBackdrop"),
   baseButtons: document.querySelectorAll("[data-base-currency]"),
   form: document.querySelector("#assetForm"),
   formTitle: document.querySelector("#formTitle"),
@@ -166,7 +170,9 @@ const dom = {
   syncSaveButton: document.querySelector("#syncSaveButton"),
   cloudUploadButton: document.querySelector("#cloudUploadButton"),
   cloudDownloadButton: document.querySelector("#cloudDownloadButton"),
+  syncClearTokenButton: document.querySelector("#syncClearTokenButton"),
   cloudSyncStatus: document.querySelector("#cloudSyncStatus"),
+  syncTokenState: document.querySelector("#syncTokenState"),
   allocationTotal: document.querySelector("#allocationTotal"),
   allocationChart: document.querySelector("#allocationChart"),
   allocationInsights: document.querySelector("#allocationInsights"),
@@ -1476,7 +1482,8 @@ function importPortfolio(file) {
 }
 
 function getCloudSettingsFromForm() {
-  state.cloud.token = dom.syncToken.value.trim();
+  const token = dom.syncToken.value.trim();
+  if (token) state.cloud.token = token;
   state.cloud.gistId = dom.syncGistId.value.trim();
   state.cloud.autoSync = dom.syncAuto.checked;
 }
@@ -1519,15 +1526,20 @@ function cloudStatusText() {
 
 function renderCloudSync() {
   if (!dom.syncToken) return;
-  if (document.activeElement !== dom.syncToken) dom.syncToken.value = state.cloud.token || "";
+  if (document.activeElement !== dom.syncToken) {
+    dom.syncToken.value = "";
+    dom.syncToken.placeholder = state.cloud.token ? "已設定，可貼新 token 更新" : "需要 gist 權限";
+  }
   if (document.activeElement !== dom.syncGistId) dom.syncGistId.value = state.cloud.gistId || "";
   dom.syncAuto.checked = Boolean(state.cloud.autoSync);
   dom.cloudSyncStatus.textContent = state.cloud.busy ? "雲端同步中..." : cloudStatusText();
+  dom.syncTokenState.textContent = state.cloud.token ? "Token 已設定" : "Token 尚未設定";
 
   const hasToken = Boolean(state.cloud.token || dom.syncToken.value.trim());
   dom.cloudUploadButton.disabled = state.cloud.busy || !hasToken;
   dom.cloudDownloadButton.disabled = state.cloud.busy || !hasToken;
   dom.syncSaveButton.disabled = state.cloud.busy;
+  dom.syncClearTokenButton.disabled = state.cloud.busy || !state.cloud.token;
 }
 
 function scheduleAutoSync() {
@@ -1721,6 +1733,7 @@ async function downloadCloudSync(options = {}) {
 
 async function saveCloudSettings() {
   getCloudSettingsFromForm();
+  dom.syncToken.value = "";
   state.cloud.status = state.cloud.token ? "同步設定已儲存" : "尚未設定";
   saveState({ sync: false });
   renderCloudSync();
@@ -1731,10 +1744,37 @@ async function saveCloudSettings() {
   }
 }
 
+function openMenu() {
+  dom.appMenu.classList.remove("is-hidden");
+  dom.menuBackdrop.classList.remove("is-hidden");
+  dom.menuButton.setAttribute("aria-expanded", "true");
+  renderCloudSync();
+}
+
+function closeMenu() {
+  dom.appMenu.classList.add("is-hidden");
+  dom.menuBackdrop.classList.add("is-hidden");
+  dom.menuButton.setAttribute("aria-expanded", "false");
+}
+
+function clearCloudToken() {
+  if (!state.cloud.token) return;
+  if (!window.confirm("清除這台裝置儲存的 GitHub Token？")) return;
+  state.cloud.token = "";
+  state.cloud.autoSync = false;
+  state.cloud.status = "Token 已清除";
+  dom.syncToken.value = "";
+  saveState({ sync: false });
+  renderCloudSync();
+}
+
 function bindEvents() {
   dom.form.addEventListener("submit", handleSubmit);
   dom.assetKind.addEventListener("change", updateKindMode);
   dom.refreshButton.addEventListener("click", refreshPrices);
+  dom.menuButton.addEventListener("click", openMenu);
+  dom.closeMenuButton.addEventListener("click", closeMenu);
+  dom.menuBackdrop.addEventListener("click", closeMenu);
   dom.cancelEditButton.addEventListener("click", resetForm);
   dom.exportButton.addEventListener("click", exportPortfolio);
   dom.importButton.addEventListener("click", () => dom.importFile.click());
@@ -1742,6 +1782,7 @@ function bindEvents() {
   dom.syncSaveButton.addEventListener("click", saveCloudSettings);
   dom.cloudUploadButton.addEventListener("click", () => uploadCloudSync());
   dom.cloudDownloadButton.addEventListener("click", () => downloadCloudSync());
+  dom.syncClearTokenButton.addEventListener("click", clearCloudToken);
   dom.syncAuto.addEventListener("change", saveCloudSettings);
   dom.syncToken.addEventListener("input", renderCloudSync);
   dom.syncGistId.addEventListener("input", renderCloudSync);
@@ -1806,13 +1847,17 @@ function bindEvents() {
     if (document.visibilityState === "visible" && stale && state.positions.length) refreshPrices();
   });
 
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !dom.appMenu.classList.contains("is-hidden")) closeMenu();
+  });
+
   window.addEventListener("resize", drawAllocationChart);
 }
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (location.protocol === "file:") return;
-  navigator.serviceWorker.register("./service-worker.js?v=20").catch((error) => {
+  navigator.serviceWorker.register("./service-worker.js?v=21").catch((error) => {
     console.warn("Service worker registration failed", error);
   });
 }
