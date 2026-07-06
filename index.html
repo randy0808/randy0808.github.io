@@ -10,7 +10,7 @@
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=18">
+    <link rel="stylesheet" href="styles.css?v=19">
   </head>
   <body>
     <div class="app-shell">
@@ -31,6 +31,10 @@
           <button class="button button-primary" type="button" id="refreshButton">
             <span aria-hidden="true">↻</span>
             更新
+          </button>
+          <button class="button button-secondary menu-button" type="button" id="menuButton" aria-controls="appMenu" aria-expanded="false">
+            <span aria-hidden="true">☰</span>
+            選單
           </button>
         </div>
       </header>
@@ -130,31 +134,6 @@
               </div>
             </form>
 
-            <div class="cloud-sync" aria-label="雲端同步">
-              <div class="cloud-sync-head">
-                <h3>雲端同步</h3>
-                <span id="cloudSyncStatus">尚未設定</span>
-              </div>
-              <div class="sync-grid">
-                <label class="wide">
-                  <span>GitHub Token</span>
-                  <input id="syncToken" type="password" autocomplete="off" placeholder="需要 gist 權限">
-                </label>
-                <label>
-                  <span>同步 ID</span>
-                  <input id="syncGistId" type="text" autocomplete="off" placeholder="可留空">
-                </label>
-                <label class="sync-toggle">
-                  <input id="syncAuto" type="checkbox">
-                  <span>自動同步</span>
-                </label>
-              </div>
-              <div class="form-actions">
-                <button class="button button-secondary" type="button" id="syncSaveButton">儲存設定</button>
-                <button class="button button-primary" type="button" id="cloudUploadButton">上傳雲端</button>
-                <button class="button button-secondary" type="button" id="cloudDownloadButton">下載雲端</button>
-              </div>
-            </div>
           </section>
 
           <section class="panel allocation-panel">
@@ -223,6 +202,44 @@
       </main>
     </div>
 
-    <script src="app.js?v=20" defer></script>
+    <div class="menu-backdrop is-hidden" id="menuBackdrop"></div>
+    <aside class="app-menu is-hidden" id="appMenu" role="dialog" aria-modal="true" aria-label="主選單">
+      <div class="menu-head">
+        <div>
+          <h2>主選單</h2>
+          <p id="cloudSyncStatus">尚未設定</p>
+        </div>
+        <button class="icon-button" type="button" id="closeMenuButton" aria-label="關閉選單">×</button>
+      </div>
+
+      <section class="menu-section cloud-sync" aria-label="雲端同步">
+        <div class="cloud-sync-head">
+          <h3>Token 設定</h3>
+          <span id="syncTokenState">Token 尚未設定</span>
+        </div>
+        <div class="sync-grid">
+          <label class="wide">
+            <span>GitHub Token</span>
+            <input id="syncToken" type="password" autocomplete="off" placeholder="需要 gist 權限">
+          </label>
+          <label>
+            <span>同步 ID</span>
+            <input id="syncGistId" type="text" autocomplete="off" placeholder="可留空">
+          </label>
+          <label class="sync-toggle">
+            <input id="syncAuto" type="checkbox">
+            <span>自動同步</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="button button-secondary" type="button" id="syncSaveButton">儲存設定</button>
+          <button class="button button-primary" type="button" id="cloudUploadButton">上傳雲端</button>
+          <button class="button button-secondary" type="button" id="cloudDownloadButton">下載雲端</button>
+          <button class="button button-danger" type="button" id="syncClearTokenButton">清除 Token</button>
+        </div>
+      </section>
+    </aside>
+
+    <script src="app.js?v=21" defer></script>
   </body>
 </html>
