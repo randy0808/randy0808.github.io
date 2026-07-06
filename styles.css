@@ -23,6 +23,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
 }
@@ -49,6 +50,13 @@ button {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
 }
 
 .brand {
@@ -469,22 +477,31 @@ select:focus {
 
 .allocation-panel {
   align-self: start;
+  container-type: inline-size;
   max-height: min(720px, calc(100vh - 130px));
   min-height: 300px;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow: hidden;
 }
 
 .chart-wrap {
+  width: 100%;
+  max-width: 100%;
   display: grid;
-  grid-template-columns: minmax(170px, 190px) minmax(0, 1fr);
+  grid-template-columns: minmax(250px, 320px) minmax(220px, 1fr);
   align-items: start;
   gap: 16px;
   min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .chart-main {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
   justify-items: center;
   gap: 14px;
@@ -496,26 +513,35 @@ select:focus {
 }
 
 .legend {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
   gap: 10px;
-  max-height: min(520px, calc(100vh - 280px));
-  min-height: 0;
+  max-height: min(620px, calc(100vh - 250px));
+  min-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   align-content: start;
 }
 
 .legend-row {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) 4.5em;
   grid-template-areas:
     "dot label percent"
     ". value value";
   align-items: center;
   column-gap: 8px;
   row-gap: 2px;
-  margin: 0 -6px;
+  margin: 0;
   padding: 5px 6px;
   border-radius: 8px;
   cursor: pointer;
@@ -563,8 +589,9 @@ select:focus {
 .legend-market-value {
   grid-area: value;
   min-width: 0;
-  overflow: visible;
-  text-overflow: clip;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-weight: 700;
@@ -584,6 +611,8 @@ select:focus {
 
 .allocation-insights {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
   gap: 10px;
   color: var(--muted);
@@ -619,18 +648,25 @@ select:focus {
 }
 
 .mix-bars {
+  min-width: 0;
   display: grid;
   gap: 8px;
 }
 
 .mix-bar {
+  min-width: 0;
   display: grid;
-  grid-template-columns: 3.8em minmax(0, 1fr) 3.5em;
+  grid-template-columns: 4.2em minmax(42px, 1fr) 3.5em;
+  grid-template-areas:
+    "label track percent"
+    "label value value";
   align-items: center;
+  row-gap: 2px;
   gap: 8px;
 }
 
 .mix-bar-label,
+.mix-bar-value,
 .mix-bar-percent {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -639,15 +675,27 @@ select:focus {
   font-weight: 760;
 }
 
+.mix-bar-value {
+  grid-area: value;
+  color: var(--text);
+  text-align: right;
+}
+
 .mix-bar-percent {
+  grid-area: percent;
   text-align: right;
 }
 
 .mix-bar-track {
+  grid-area: track;
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--panel-soft);
+}
+
+.mix-bar-label {
+  grid-area: label;
 }
 
 .mix-bar-fill {
@@ -843,9 +891,35 @@ th {
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
 
+@media (max-width: 1100px) {
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 640px) {
+  .allocation-panel {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .chart-wrap {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    overflow-x: hidden;
+  }
+
+  .chart-main {
+    width: min(100%, 360px);
+  }
+
+  .legend {
+    width: 100%;
+    max-height: clamp(340px, 54vh, 520px);
+    min-height: 340px;
+    overflow-x: hidden;
   }
 }
 
@@ -861,6 +935,10 @@ th {
     flex-direction: column;
   }
 
+  .header-left {
+    align-items: center;
+  }
+
   .header-actions {
     justify-content: stretch;
   }
@@ -868,6 +946,11 @@ th {
   .segmented,
   .header-actions .button {
     width: 100%;
+  }
+
+  .header-left .menu-button {
+    width: auto;
+    flex: 0 0 auto;
   }
 
   .holdings-tools,
@@ -900,6 +983,8 @@ th {
 
   .legend {
     width: 100%;
-    max-height: 420px;
+    max-height: clamp(340px, 54vh, 520px);
+    min-height: 340px;
+    overflow-x: hidden;
   }
 }
