@@ -10,16 +10,22 @@
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles-v20.css">
+    <link rel="stylesheet" href="styles-v21.css">
   </head>
   <body>
     <div class="app-shell">
       <header class="app-header">
-        <div class="brand">
-          <img class="brand-mark" src="icon.svg" alt="">
-          <div>
-            <h1>資產儀表板</h1>
-            <p id="syncStatus">尚未同步市場價格</p>
+        <div class="header-left">
+          <button class="button button-secondary menu-button" type="button" id="menuButton" aria-controls="appMenu" aria-expanded="false">
+            <span aria-hidden="true">☰</span>
+            選單
+          </button>
+          <div class="brand">
+            <img class="brand-mark" src="icon.svg" alt="">
+            <div>
+              <h1>資產儀表板</h1>
+              <p id="syncStatus">尚未同步市場價格</p>
+            </div>
           </div>
         </div>
 
@@ -31,10 +37,6 @@
           <button class="button button-primary" type="button" id="refreshButton">
             <span aria-hidden="true">↻</span>
             更新
-          </button>
-          <button class="button button-secondary menu-button" type="button" id="menuButton" aria-controls="appMenu" aria-expanded="false">
-            <span aria-hidden="true">☰</span>
-            選單
           </button>
         </div>
       </header>
@@ -251,6 +253,6 @@
       </section>
     </aside>
 
-    <script src="app-v22.js" defer></script>
+    <script src="app-v23.js" defer></script>
   </body>
 </html>
