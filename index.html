@@ -10,7 +10,7 @@
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=19">
+    <link rel="stylesheet" href="styles.css?v=20">
   </head>
   <body>
     <div class="app-shell">
@@ -76,8 +76,8 @@
                 <label>
                   <span>類型</span>
                   <select id="assetKind">
-                    <option value="crypto">加密貨幣</option>
                     <option value="us-stock">美股</option>
+                    <option value="crypto">加密貨幣</option>
                     <option value="tw-stock">台股</option>
                     <option value="manual">手動資產</option>
                   </select>
@@ -212,7 +212,18 @@
         <button class="icon-button" type="button" id="closeMenuButton" aria-label="關閉選單">×</button>
       </div>
 
-      <section class="menu-section cloud-sync" aria-label="雲端同步">
+      <div class="menu-panel" id="menuMainPanel">
+        <button class="menu-item" type="button" id="tokenSettingsButton" aria-controls="tokenSettingsPanel">
+          <span>
+            <strong>Token 設定</strong>
+            <small id="tokenSettingsSummary">Token 尚未設定</small>
+          </span>
+          <span class="menu-item-arrow" aria-hidden="true">›</span>
+        </button>
+      </div>
+
+      <section class="menu-section cloud-sync is-hidden" id="tokenSettingsPanel" aria-label="Token 設定">
+        <button class="text-button menu-back-button" type="button" id="backToMenuButton">← 主選單</button>
         <div class="cloud-sync-head">
           <h3>Token 設定</h3>
           <span id="syncTokenState">Token 尚未設定</span>
@@ -240,6 +251,6 @@
       </section>
     </aside>
 
-    <script src="app.js?v=21" defer></script>
+    <script src="app.js?v=22" defer></script>
   </body>
 </html>
