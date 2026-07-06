@@ -820,20 +820,21 @@ function renderAllocationInsights(items, total) {
   const topThreeValue = items.slice(0, 3).reduce((sum, item) => sum + item.value, 0);
   const topThreePercent = (topThreeValue / total) * 100;
   const kindTotals = items.reduce((totals, item) => {
-    const label = KIND_LABELS[item.position.kind] || "其他";
-    totals.set(label, (totals.get(label) || 0) + item.value);
+    const kind = item.position.kind || "manual";
+    totals.set(kind, (totals.get(kind) || 0) + item.value);
     return totals;
   }, new Map());
-  const kindRows = [...kindTotals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([label, value], index) => {
+  const kindRows = ["crypto", "us-stock", "tw-stock"]
+    .map((kind, index) => {
+      const label = KIND_LABELS[kind] || kind;
+      const value = kindTotals.get(kind) || 0;
       const pct = (value / total) * 100;
       const color = CHART_COLORS[(index + 3) % CHART_COLORS.length];
       return `
         <div class="mix-bar">
           <span class="mix-bar-label">${escapeHtml(label)}</span>
           <span class="mix-bar-track"><span class="mix-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></span></span>
+          <span class="mix-bar-value">${formatCompactCurrency(value)}</span>
           <span class="mix-bar-percent">${pct.toFixed(1)}%</span>
         </div>
       `;
@@ -1879,7 +1880,7 @@ function bindEvents() {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (location.protocol === "file:") return;
-  navigator.serviceWorker.register("./service-worker.js?v=22").catch((error) => {
+  navigator.serviceWorker.register("./service-worker-v26.js", { scope: "./" }).catch((error) => {
     console.warn("Service worker registration failed", error);
   });
 }
