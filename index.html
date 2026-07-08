@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b7a75">
-    <meta name="build-version" content="2026-07-06-v26b">
+    <meta name="build-version" content="2026-07-09-v27">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="資產儀表板">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles-v24.css">
+    <link rel="stylesheet" href="styles-v25.css">
   </head>
   <body>
     <div class="app-shell">
@@ -149,7 +149,6 @@
                 <canvas id="allocationChart" width="260" height="260" aria-label="資產配置圖"></canvas>
                 <div id="allocationInsights" class="allocation-insights" aria-label="配置洞察"></div>
               </div>
-              <div id="allocationLegend" class="legend"></div>
             </div>
           </section>
         </section>
@@ -171,7 +170,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr>
+                <tr id="positionsHeadRow">
                   <th>
                     <button class="sort-header" type="button" data-sort-field="asset">資產<span class="sort-indicator" aria-hidden="true"></span></button>
                   </th>
@@ -223,6 +222,13 @@
           </span>
           <span class="menu-item-arrow" aria-hidden="true">›</span>
         </button>
+        <button class="menu-item" type="button" id="columnSettingsButton" aria-controls="columnSettingsPanel">
+          <span>
+            <strong>欄位設定</strong>
+            <small id="columnSettingsSummary">金額正常顯示</small>
+          </span>
+          <span class="menu-item-arrow" aria-hidden="true">›</span>
+        </button>
       </div>
 
       <section class="menu-section cloud-sync is-hidden" id="tokenSettingsPanel" aria-label="Token 設定">
@@ -252,8 +258,25 @@
           <button class="button button-danger" type="button" id="syncClearTokenButton">清除 Token</button>
         </div>
       </section>
+
+      <section class="menu-section column-settings is-hidden" id="columnSettingsPanel" aria-label="欄位設定">
+        <button class="text-button menu-back-button" type="button" id="backToMenuFromColumnsButton">← 主選單</button>
+        <div class="cloud-sync-head">
+          <h3>欄位設定</h3>
+          <span id="privacyMaskState">金額正常顯示</span>
+        </div>
+        <label class="sync-toggle">
+          <input id="privacyMaskToggle" type="checkbox">
+          <span>金額遮罩</span>
+        </label>
+        <div class="column-order-head">
+          <h3>欄位順序</h3>
+          <button class="text-button" type="button" id="resetColumnOrderButton">重設</button>
+        </div>
+        <div id="columnOrderList" class="column-order-list"></div>
+      </section>
     </aside>
 
-    <script src="app-v26.js" defer></script>
+    <script src="app-v27.js" defer></script>
   </body>
 </html>
