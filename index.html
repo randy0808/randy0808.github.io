@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b7a75">
-    <meta name="build-version" content="2026-07-09-v33">
+    <meta name="build-version" content="2026-07-09-v34">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="資產儀表板">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles-v27.css">
+    <link rel="stylesheet" href="styles-v34.css">
   </head>
   <body>
     <div class="app-shell">
@@ -279,8 +279,10 @@
           <button class="button button-secondary" type="button" id="syncSaveButton">儲存設定</button>
           <button class="button button-primary" type="button" id="cloudUploadButton">上傳雲端</button>
           <button class="button button-secondary" type="button" id="cloudDownloadButton">下載雲端</button>
+          <button class="button button-secondary" type="button" id="copyDeviceSyncLinkButton">複製新裝置同步連結</button>
           <button class="button button-danger" type="button" id="syncClearTokenButton">清除 Token</button>
         </div>
+        <p class="sync-device-note">在有資料的裝置複製連結，傳到手機或 Mac 開啟一次即可自動下載。連結含同步權限，請勿公開分享。</p>
       </section>
 
       <section class="menu-section column-settings is-hidden" id="columnSettingsPanel" aria-label="欄位設定">
@@ -323,6 +325,6 @@
       </section>
     </aside>
 
-    <script src="app-v32.js" defer></script>
+    <script src="app-v34.js" defer></script>
   </body>
 </html>
