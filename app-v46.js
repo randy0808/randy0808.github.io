@@ -1181,7 +1181,7 @@ function openPositionDetail(id) {
     id: position.id,
     symbol: position.symbol,
     kind: position.kind,
-    v: "45"
+    v: "46"
   });
   window.open(`asset-detail.html?${params.toString()}`, "_blank", "noopener");
 }
