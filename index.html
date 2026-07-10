@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b7a75">
-    <meta name="build-version" content="2026-07-11-v42">
+    <meta name="build-version" content="2026-07-11-v44">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="資產儀表板">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles-v42.css">
+    <link rel="stylesheet" href="styles-v44.css">
   </head>
   <body>
     <div class="app-shell">
@@ -35,9 +35,9 @@
             <button class="segment is-active" type="button" data-base-currency="TWD">TWD</button>
             <button class="segment" type="button" data-base-currency="USD">USD</button>
           </div>
-          <button class="button button-primary" type="button" id="refreshButton">
+          <button class="button button-primary" type="button" id="refreshButton" onclick="this.disabled=false;this.classList.add('is-loading','is-clicked');this.setAttribute('aria-busy','true');var label=this.querySelector('[data-refresh-label]');if(label)label.textContent='更新中';var status=document.getElementById('syncStatus');if(status)status.textContent='已點擊更新，正在處理...';if(window.wealthtrackManualRefresh)window.wealthtrackManualRefresh(event);">
             <span aria-hidden="true">↻</span>
-            更新
+            <span data-refresh-label>更新</span>
           </button>
         </div>
       </header>
@@ -362,6 +362,6 @@
       </section>
     </aside>
 
-    <script src="app-v42.js" defer></script>
+    <script src="app-v44.js" defer></script>
   </body>
 </html>
