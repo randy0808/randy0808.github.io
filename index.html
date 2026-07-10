@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b7a75">
-    <meta name="build-version" content="2026-07-10-v38">
+    <meta name="build-version" content="2026-07-10-v39">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="資產儀表板">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles-v38.css">
+    <link rel="stylesheet" href="styles-v39.css">
   </head>
   <body>
     <div class="app-shell">
@@ -67,108 +67,144 @@
         </section>
 
         <section class="workspace-grid">
-          <section class="panel asset-entry-panel">
-            <div class="panel-heading">
-              <h2 id="formTitle">新增資產</h2>
-              <button class="text-button is-hidden" type="button" id="cancelEditButton">取消編輯</button>
-            </div>
-
-            <form id="assetForm" autocomplete="off">
-              <input type="hidden" id="editingId">
-              <div class="form-grid">
-                <label>
-                  <span>類型</span>
-                  <select id="assetKind">
-                    <option value="us-stock">美股</option>
-                    <option value="crypto">加密貨幣</option>
-                    <option value="tw-stock">台股</option>
-                    <option value="manual">手動資產</option>
-                  </select>
-                </label>
-
-                <label>
-                  <span>代號</span>
-                  <input id="assetSymbol" type="text" placeholder="BTC, ETH, AAPL, 2330" required>
-                </label>
-
-                <label class="wide">
-                  <span>名稱</span>
-                  <input id="assetName" type="text" placeholder="可留空">
-                </label>
-
-                <label>
-                  <span>數量</span>
-                  <input id="assetQuantity" type="number" min="0" step="any" inputmode="decimal" required>
-                </label>
-
-                <label>
-                  <span>平均成本</span>
-                  <input id="assetAverageCost" type="number" min="0" step="any" inputmode="decimal" required>
-                </label>
-
-                <label>
-                  <span>成本幣別</span>
-                  <select id="costCurrency">
-                    <option value="QUOTE">跟報價相同</option>
-                    <option value="TWD">TWD</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </label>
-
-                <label class="manual-field">
-                  <span>手動現價</span>
-                  <input id="manualPrice" type="number" min="0" step="any" inputmode="decimal">
-                </label>
-
-                <label class="manual-field">
-                  <span>現價幣別</span>
-                  <select id="manualCurrency">
-                    <option value="TWD">TWD</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </label>
+          <div class="workspace-column">
+            <section class="panel asset-entry-panel">
+              <div class="panel-heading">
+                <h2 id="formTitle">新增資產</h2>
+                <button class="text-button is-hidden" type="button" id="cancelEditButton">取消編輯</button>
               </div>
 
-              <div class="form-actions">
-                <button class="button button-primary" type="submit" id="submitAssetButton">新增資產</button>
-                <div class="export-control" id="exportControl">
-                  <button class="button button-secondary" type="button" id="exportButton" aria-haspopup="menu" aria-controls="exportMenu" aria-expanded="false">
-                    匯出
-                    <span aria-hidden="true">▾</span>
-                  </button>
-                  <div class="export-popover is-hidden" id="exportMenu" role="menu" aria-label="選擇匯出格式">
-                    <button type="button" role="menuitem" data-export-format="xlsx">
-                      <strong>Excel</strong>
-                      <small>.xlsx 活頁簿</small>
+              <form id="assetForm" autocomplete="off">
+                <input type="hidden" id="editingId">
+                <div class="form-grid">
+                  <label>
+                    <span>類型</span>
+                    <select id="assetKind">
+                      <option value="us-stock">美股</option>
+                      <option value="crypto">加密貨幣</option>
+                      <option value="tw-stock">台股</option>
+                      <option value="manual">手動資產</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>代號</span>
+                    <input id="assetSymbol" type="text" placeholder="BTC, ETH, AAPL, 2330" required>
+                  </label>
+
+                  <label class="wide">
+                    <span>名稱</span>
+                    <input id="assetName" type="text" placeholder="可留空">
+                  </label>
+
+                  <label>
+                    <span>數量</span>
+                    <input id="assetQuantity" type="number" min="0" step="any" inputmode="decimal" required>
+                  </label>
+
+                  <label>
+                    <span>平均成本</span>
+                    <input id="assetAverageCost" type="number" min="0" step="any" inputmode="decimal" required>
+                  </label>
+
+                  <label>
+                    <span>成本幣別</span>
+                    <select id="costCurrency">
+                      <option value="QUOTE">跟報價相同</option>
+                      <option value="TWD">TWD</option>
+                      <option value="USD">USD</option>
+                    </select>
+                  </label>
+
+                  <label class="manual-field">
+                    <span>手動現價</span>
+                    <input id="manualPrice" type="number" min="0" step="any" inputmode="decimal">
+                  </label>
+
+                  <label class="manual-field">
+                    <span>現價幣別</span>
+                    <select id="manualCurrency">
+                      <option value="TWD">TWD</option>
+                      <option value="USD">USD</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="form-actions">
+                  <button class="button button-primary" type="submit" id="submitAssetButton">新增資產</button>
+                  <div class="export-control" id="exportControl">
+                    <button class="button button-secondary" type="button" id="exportButton" aria-haspopup="menu" aria-controls="exportMenu" aria-expanded="false">
+                      匯出
+                      <span aria-hidden="true">▾</span>
                     </button>
-                    <button type="button" role="menuitem" data-export-format="sheets">
-                      <strong>Google 試算表</strong>
-                      <small>開新分頁並複製資料</small>
-                    </button>
-                    <button type="button" role="menuitem" data-export-format="json">
-                      <strong>完整備份</strong>
-                      <small>.json 原始資料備份</small>
-                    </button>
+                    <div class="export-popover is-hidden" id="exportMenu" role="menu" aria-label="選擇匯出格式">
+                      <button type="button" role="menuitem" data-export-format="xlsx">
+                        <strong>Excel</strong>
+                        <small>.xlsx 活頁簿</small>
+                      </button>
+                      <button type="button" role="menuitem" data-export-format="sheets">
+                        <strong>Google 試算表</strong>
+                        <small>開新分頁並複製資料</small>
+                      </button>
+                      <button type="button" role="menuitem" data-export-format="json">
+                        <strong>完整備份</strong>
+                        <small>.json 原始資料備份</small>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </form>
+              </form>
+            </section>
 
-            <div id="entryQuickStats" class="entry-quick-stats" aria-label="快速概覽"></div>
-          </section>
+            <section class="panel dividend-panel">
+              <div id="entryQuickStats" class="entry-quick-stats" aria-label="每月預估股息"></div>
+            </section>
+          </div>
 
-          <section class="panel allocation-panel">
-            <div class="panel-heading">
-              <h2>資產配置</h2>
-              <span id="allocationTotal">--</span>
-            </div>
-            <div class="chart-wrap">
-              <div class="chart-main">
-                <canvas id="allocationChart" width="260" height="260" aria-label="資產配置圖"></canvas>
-                <div id="allocationInsights" class="allocation-insights" aria-label="配置洞察"></div>
+          <div class="workspace-column">
+            <section class="panel allocation-panel">
+              <div class="panel-heading">
+                <h2>資產配置</h2>
+                <span id="allocationTotal">--</span>
               </div>
-            </div>
-          </section>
+              <div class="chart-wrap">
+                <div class="chart-main">
+                  <canvas id="allocationChart" width="260" height="260" aria-label="資產配置圖"></canvas>
+                  <div id="allocationInsights" class="allocation-insights" aria-label="配置洞察"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel growth-panel">
+              <div class="panel-heading growth-heading">
+                <div>
+                  <h2>總資產成長</h2>
+                  <p id="growthRangeLabel">自 2026/7/10 起</p>
+                </div>
+                <span id="growthTotal">--</span>
+              </div>
+              <div class="growth-range-tabs" aria-label="總資產成長範圍">
+                <button type="button" data-growth-range="week">週</button>
+                <button type="button" data-growth-range="month">月</button>
+                <button type="button" data-growth-range="year">年</button>
+                <button type="button" data-growth-range="fiveYear">五年</button>
+                <button type="button" data-growth-range="since">起始至今</button>
+              </div>
+              <div class="growth-chart-wrap">
+                <canvas id="assetGrowthChart" width="680" height="260" aria-label="總資產成長圖"></canvas>
+              </div>
+              <div class="growth-stats">
+                <div>
+                  <span>期間變化</span>
+                  <strong id="growthChange">--</strong>
+                </div>
+                <div>
+                  <span>資料點</span>
+                  <strong id="growthPointCount">--</strong>
+                </div>
+              </div>
+            </section>
+          </div>
         </section>
 
         <section class="panel holdings-panel">
@@ -326,6 +362,6 @@
       </section>
     </aside>
 
-    <script src="app-v38.js" defer></script>
+    <script src="app-v39.js" defer></script>
   </body>
 </html>
