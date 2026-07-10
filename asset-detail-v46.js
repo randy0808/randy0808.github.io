@@ -248,7 +248,14 @@ async function loadFundamentals() {
 
 async function fetchPriceHistory(target, rangeKey) {
   if (target.kind === "crypto") return fetchCryptoHistory(target, rangeKey);
-  if (target.kind === "us-stock" || target.kind === "tw-stock") return fetchYahooPriceHistory(target, rangeKey);
+  if (target.kind === "us-stock" || target.kind === "tw-stock") {
+    try {
+      return await fetchYahooPriceHistory(target, rangeKey);
+    } catch (error) {
+      if (target.kind === "us-stock") return fetchStooqPriceHistory(target, rangeKey);
+      throw error;
+    }
+  }
   return [];
 }
 
@@ -264,6 +271,23 @@ async function fetchYahooPriceHistory(target, rangeKey) {
     date: new Date(timestamp * 1000),
     value: Number(closes[index])
   })).filter((point) => Number.isFinite(point.value));
+}
+
+async function fetchStooqPriceHistory(target, rangeKey) {
+  const symbol = String(target.marketSymbol || target.symbol || "").trim().toLowerCase().replace(".", "-");
+  const config = RANGE_CONFIG[rangeKey] || RANGE_CONFIG.year;
+  const end = new Date();
+  const start = config.days === "max"
+    ? new Date(1980, 0, 1)
+    : new Date(Date.now() - Number(config.days || 365) * 24 * 60 * 60 * 1000);
+  const d1 = formatStooqDate(start);
+  const d2 = formatStooqDate(end);
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(`${symbol}.us`)}&d1=${d1}&d2=${d2}&i=d`;
+  const csv = await fetchTextWithFallback(url, { timeoutMs: 12_000 });
+  return csv.trim().split(/\r?\n/).slice(1).map((line) => {
+    const [date, , , , close] = line.split(",");
+    return { date: new Date(`${date}T00:00:00`), value: Number(close) };
+  }).filter((point) => Number.isFinite(point.value));
 }
 
 async function fetchCryptoHistory(target, rangeKey) {
@@ -718,6 +742,20 @@ async function fetchText(url, options = {}) {
   }
 }
 
+async function fetchTextWithFallback(url, options = {}) {
+  const { timeoutMs = 12_000 } = options;
+  try {
+    return await fetchText(url, { timeoutMs });
+  } catch (error) {
+    try {
+      return await fetchText(`https://r.jina.ai/http://${url}`, { timeoutMs });
+    } catch (readerError) {
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      return fetchText(proxyUrl, { timeoutMs });
+    }
+  }
+}
+
 function parseJsonFromText(text) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -770,6 +808,13 @@ function formatRatio(value) {
 
 function formatDate(date) {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatStooqDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }
 
 function valueClass(value) {
