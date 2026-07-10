@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b7a75">
-    <meta name="build-version" content="2026-07-09-v34">
+    <meta name="build-version" content="2026-07-10-v35">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="資產儀表板">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>資產儀表板</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles-v34.css">
+    <link rel="stylesheet" href="styles-v35.css">
   </head>
   <body>
     <div class="app-shell">
@@ -67,7 +67,7 @@
         </section>
 
         <section class="workspace-grid">
-          <section class="panel">
+          <section class="panel asset-entry-panel">
             <div class="panel-heading">
               <h2 id="formTitle">新增資產</h2>
               <button class="text-button is-hidden" type="button" id="cancelEditButton">取消編輯</button>
@@ -154,6 +154,7 @@
               </div>
             </form>
 
+            <div id="entryQuickStats" class="entry-quick-stats" aria-label="快速概覽"></div>
           </section>
 
           <section class="panel allocation-panel">
@@ -325,6 +326,6 @@
       </section>
     </aside>
 
-    <script src="app-v34.js" defer></script>
+    <script src="app-v35.js" defer></script>
   </body>
 </html>
