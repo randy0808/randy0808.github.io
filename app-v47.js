@@ -1276,7 +1276,7 @@ function renderCell(columnId, position, metrics) {
   if (columnId === "profit") {
     return `
       <td class="${profitAmountClass}">
-        ${formatSensitiveCurrency(metrics.profit)}
+        ${formatWholeSensitiveCurrency(metrics.profit)}
         <div class="${profitPercentClass}">${formatPercent(metrics.profitPercent)}</div>
       </td>
     `;
@@ -1338,7 +1338,7 @@ function renderRowsLegacy() {
       </td>
       <td class="${currentValueClass}">${formatCurrency(metrics.currentValue)}</td>
       <td class="${profitClass}">
-        ${formatCurrency(metrics.profit)}
+        ${formatWholeSensitiveCurrency(metrics.profit)}
         <div>${formatPercent(metrics.profitPercent)}</div>
       </td>
       <td>
