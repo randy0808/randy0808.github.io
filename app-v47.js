@@ -12,6 +12,11 @@ const DIVIDEND_CACHE_MS = 24 * 60 * 60 * 1000;
 const DIVIDEND_FETCH_DELAY_MS = 350;
 const US_DIVIDEND_TAX_RATE = 0.3;
 const HISTORY_START_DATE = "2026-07-10";
+const HISTORY_MAX_POINTS = 2_500;
+const HISTORY_MIN_POINT_GAP_MS = 60_000;
+const HISTORY_FORCED_CHANGE_TWD = 100;
+const HISTORY_AUTO_CHANGE_TWD = 1_000;
+const HISTORY_AUTO_CHANGE_RATIO = 0.005;
 const HISTORY_RANGE_DAYS = {
   week: 7,
   month: 31,
@@ -285,22 +290,68 @@ function normalizeColumnOrder(order) {
   return [...filtered, ...missing];
 }
 
+function historyTimestampFor(point, date) {
+  const timestamp = Number(point?.timestamp || point?.ts);
+  if (Number.isFinite(timestamp) && timestamp > 0) return timestamp;
+  const parsed = Date.parse(`${date}T00:00:00+08:00`);
+  return Number.isFinite(parsed) ? parsed : Date.parse(date);
+}
+
+function historyChangeAmount(previous, valueTwd) {
+  if (!previous || !Number.isFinite(valueTwd)) return { amount: Infinity, ratio: Infinity };
+  const amount = Math.abs(valueTwd - previous.valueTwd);
+  const baseline = Math.max(Math.abs(previous.valueTwd), Math.abs(valueTwd), 1);
+  return { amount, ratio: amount / baseline };
+}
+
+function shouldKeepHistoryPoint(previous, point) {
+  if (!previous) return true;
+  if (previous.date !== point.date) return true;
+  const { amount, ratio } = historyChangeAmount(previous, point.valueTwd);
+  if (amount >= HISTORY_FORCED_CHANGE_TWD && ratio >= 0.0001) return true;
+  return Math.abs(point.timestamp - previous.timestamp) >= HISTORY_MIN_POINT_GAP_MS;
+}
+
+function shouldRecordHistoryPoint(previous, valueTwd, options = {}) {
+  if (!previous) return true;
+  const date = taipeiDateKey();
+  if (previous.date !== date) return true;
+  const { amount, ratio } = historyChangeAmount(previous, valueTwd);
+  if (options.force) return amount >= HISTORY_FORCED_CHANGE_TWD;
+  if (Date.now() - previous.timestamp < HISTORY_MIN_POINT_GAP_MS) return false;
+  return amount >= HISTORY_AUTO_CHANGE_TWD && ratio >= HISTORY_AUTO_CHANGE_RATIO;
+}
+
 function normalizeHistoryPoints(points) {
   if (!Array.isArray(points)) return [];
-  const byDate = new Map();
+  const normalized = [];
   for (const point of points) {
     const date = typeof point?.date === "string" ? point.date : "";
     const valueTwd = Number(point?.valueTwd);
-    const timestamp = Number(point?.timestamp || point?.ts || Date.parse(date));
+    const timestamp = historyTimestampFor(point, date);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < HISTORY_START_DATE) continue;
     if (!Number.isFinite(valueTwd) || valueTwd < 0) continue;
-    byDate.set(date, {
+    if (!Number.isFinite(timestamp)) continue;
+    normalized.push({
       date,
       valueTwd,
-      timestamp: Number.isFinite(timestamp) ? timestamp : Date.now()
+      timestamp
     });
   }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  normalized.sort((a, b) => (a.timestamp - b.timestamp) || a.date.localeCompare(b.date));
+  const deduped = [];
+  for (const point of normalized) {
+    const previous = deduped[deduped.length - 1];
+    if (previous && previous.date === point.date) {
+      const { amount } = historyChangeAmount(previous, point.valueTwd);
+      if (amount < HISTORY_FORCED_CHANGE_TWD && Math.abs(point.timestamp - previous.timestamp) < HISTORY_MIN_POINT_GAP_MS) {
+        deduped[deduped.length - 1] = point;
+        continue;
+      }
+    }
+    if (shouldKeepHistoryPoint(previous, point)) deduped.push(point);
+  }
+  return deduped.slice(-HISTORY_MAX_POINTS);
 }
 
 function loadState() {
@@ -696,21 +747,22 @@ function taipeiDateKey(timestamp = Date.now()) {
   }).format(new Date(timestamp));
 }
 
-function recordAssetHistory(totals) {
+function recordAssetHistory(totals, options = {}) {
   if (!state.positions.length || !totals.quoted || !Number.isFinite(totals.value) || totals.value <= 0) return false;
   const valueTwd = convertCurrency(totals.value, state.baseCurrency, "TWD");
   if (!Number.isFinite(valueTwd) || valueTwd <= 0) return false;
 
-  const date = taipeiDateKey();
+  const now = Date.now();
+  const date = taipeiDateKey(now);
   if (date < HISTORY_START_DATE) return false;
   const points = normalizeHistoryPoints(state.history.points);
-  const existing = points.find((point) => point.date === date);
-  if (existing) {
+  const previous = points[points.length - 1];
+  if (!shouldRecordHistoryPoint(previous, valueTwd, options)) {
     state.history.points = points;
     return false;
   }
 
-  points.push({ date, valueTwd, timestamp: Date.now() });
+  points.push({ date, valueTwd, timestamp: now });
   state.history.points = normalizeHistoryPoints(points);
   return true;
 }
@@ -722,6 +774,10 @@ function currentHistoryPoint(totals = calculatePortfolio()) {
   const date = taipeiDateKey();
   if (date < HISTORY_START_DATE) return null;
   return { date, valueTwd, timestamp: Date.now(), live: true };
+}
+
+function recordCurrentAssetHistory(options = {}) {
+  return recordAssetHistory(calculatePortfolio(), options);
 }
 
 function historyRangeStart(range) {
@@ -741,13 +797,20 @@ function historyRangeLabel(range) {
 }
 
 function getGrowthPoints(totals) {
-  const byDate = new Map(normalizeHistoryPoints(state.history.points).map((point) => [point.date, point]));
+  const points = normalizeHistoryPoints(state.history.points);
   const live = currentHistoryPoint(totals);
-  if (live) byDate.set(live.date, live);
+  if (live) {
+    const previous = points[points.length - 1];
+    if (!previous || shouldRecordHistoryPoint(previous, live.valueTwd, { force: true })) {
+      points.push(live);
+    } else {
+      points[points.length - 1] = { ...previous, valueTwd: live.valueTwd, timestamp: live.timestamp, live: true };
+    }
+  }
   const startDate = historyRangeStart(state.history.range);
-  return [...byDate.values()]
+  return points
     .filter((point) => point.date >= startDate)
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => (a.timestamp - b.timestamp) || a.date.localeCompare(b.date));
 }
 
 function setGrowthRange(range) {
@@ -755,6 +818,18 @@ function setGrowthRange(range) {
   state.history.range = range;
   saveState();
   drawGrowthChart(calculatePortfolio());
+}
+
+function formatHistoryPointLabel(point, includeTime = false) {
+  const date = (point?.date || "").replaceAll("-", "/");
+  if (!includeTime || !Number.isFinite(point?.timestamp)) return date;
+  const time = new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(new Date(point.timestamp));
+  return `${date} ${time}`;
 }
 
 function drawGrowthChart(totals = calculatePortfolio()) {
@@ -806,9 +881,16 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   const yMin = Math.max(0, minValue - pad);
   const yMax = maxValue + pad;
   const chart = { left: 58, right: width - 20, top: 22, bottom: height - 42 };
-  const xFor = (index) => points.length === 1
-    ? (chart.left + chart.right) / 2
-    : chart.left + (index / (points.length - 1)) * (chart.right - chart.left);
+  const timestamps = points.map((point) => Number(point.timestamp)).filter(Number.isFinite);
+  const minTime = Math.min(...timestamps);
+  const maxTime = Math.max(...timestamps);
+  const sameTime = points.length === 1 || !Number.isFinite(minTime) || !Number.isFinite(maxTime) || minTime === maxTime;
+  const xForPoint = (point, index) => {
+    if (sameTime) return points.length === 1
+      ? (chart.left + chart.right) / 2
+      : chart.left + (index / (points.length - 1)) * (chart.right - chart.left);
+    return chart.left + ((point.timestamp - minTime) / (maxTime - minTime)) * (chart.right - chart.left);
+  };
   const yFor = (value) => chart.bottom - ((value - yMin) / Math.max(yMax - yMin, 1)) * (chart.bottom - chart.top);
 
   ctx.strokeStyle = line;
@@ -833,18 +915,34 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   gradient.addColorStop(0, "rgba(11, 122, 117, 0.28)");
   gradient.addColorStop(1, "rgba(11, 122, 117, 0)");
 
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    const x = xFor(index);
-    const y = yFor(convertCurrency(point.valueTwd, "TWD", state.baseCurrency));
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  const coords = points.map((point, index) => {
+    const value = convertCurrency(point.valueTwd, "TWD", state.baseCurrency);
+    return {
+      point,
+      value,
+      x: xForPoint(point, index),
+      y: yFor(value)
+    };
   });
-  if (points.length === 1) {
-    const x = xFor(0);
-    const y = yFor(convertCurrency(points[0].valueTwd, "TWD", state.baseCurrency));
-    ctx.moveTo(x - 28, y);
-    ctx.lineTo(x + 28, y);
+
+  if (coords.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(coords[0].x, chart.bottom);
+    coords.forEach((coord) => ctx.lineTo(coord.x, coord.y));
+    ctx.lineTo(coords[coords.length - 1].x, chart.bottom);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+  }
+
+  ctx.beginPath();
+  coords.forEach((coord, index) => {
+    if (index === 0) ctx.moveTo(coord.x, coord.y);
+    else ctx.lineTo(coord.x, coord.y);
+  });
+  if (coords.length === 1) {
+    ctx.moveTo(coords[0].x - 28, coords[0].y);
+    ctx.lineTo(coords[0].x + 28, coords[0].y);
   }
   ctx.strokeStyle = primary;
   ctx.lineWidth = 3;
@@ -852,19 +950,10 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   ctx.lineJoin = "round";
   ctx.stroke();
 
-  ctx.lineTo(xFor(points.length - 1), chart.bottom);
-  ctx.lineTo(xFor(0), chart.bottom);
-  ctx.closePath();
-  ctx.fillStyle = gradient;
-  ctx.fill();
-
-  points.forEach((point, index) => {
-    const value = convertCurrency(point.valueTwd, "TWD", state.baseCurrency);
-    const x = xFor(index);
-    const y = yFor(value);
+  coords.forEach((coord) => {
     ctx.beginPath();
-    ctx.arc(x, y, point.live ? 4.5 : 3.2, 0, Math.PI * 2);
-    ctx.fillStyle = point.live ? text : primary;
+    ctx.arc(coord.x, coord.y, coord.point.live ? 4.5 : 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = coord.point.live ? text : primary;
     ctx.fill();
   });
 
@@ -879,10 +968,11 @@ function drawGrowthChart(totals = calculatePortfolio()) {
 
   ctx.fillStyle = muted;
   ctx.font = "700 11px system-ui, sans-serif";
+  const includeTime = points.length > 1 && points[0].date === points[points.length - 1].date;
   ctx.textAlign = "left";
-  ctx.fillText(points[0].date.replaceAll("-", "/"), chart.left, height - 14);
+  ctx.fillText(formatHistoryPointLabel(points[0], includeTime), chart.left, height - 14);
   ctx.textAlign = "right";
-  ctx.fillText(points[points.length - 1].date.replaceAll("-", "/"), chart.right, height - 14);
+  ctx.fillText(formatHistoryPointLabel(points[points.length - 1], includeTime), chart.right, height - 14);
 }
 
 function render() {
@@ -2375,6 +2465,7 @@ function handleSubmit(event) {
       state.positions.push(position);
     }
 
+    recordCurrentAssetHistory({ force: true });
     saveState();
     resetForm();
     render();
@@ -2411,6 +2502,7 @@ function deletePosition(id) {
   state.positions = state.positions.filter((item) => item.id !== id);
   delete state.quotes[quoteKey(position)];
   delete state.dividends.profiles[dividendKey(position)];
+  recordCurrentAssetHistory({ force: true });
   saveState();
   render();
   refreshDividendProfiles();
