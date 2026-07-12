@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#0b7a75">
-    <meta name="build-version" content="2026-07-12-v56">
+    <meta name="build-version" content="2026-07-13-v58">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="資產儀表板">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -12,6 +12,8 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles-v56.css">
+    <link rel="stylesheet" href="layout-fix-v57.css">
+    <link rel="stylesheet" href="dashboard-tabs-v58.css">
   </head>
   <body>
     <div class="app-shell">
@@ -67,7 +69,7 @@
         </section>
 
         <section class="workspace-grid">
-          <div class="workspace-column">
+          <div class="workspace-column workspace-column-main">
             <section class="panel asset-entry-panel">
               <div class="panel-heading">
                 <h2 id="formTitle">新增資產</h2>
@@ -158,6 +160,10 @@
 
             <section class="panel dividend-panel">
               <div id="entryQuickStats" class="entry-quick-stats" aria-label="每月預估股息"></div>
+            </section>
+
+            <section class="panel portfolio-digest-panel">
+              <div id="portfolioDigest" class="portfolio-digest" aria-label="投組整理"></div>
             </section>
           </div>
 
@@ -362,6 +368,6 @@
       </section>
     </aside>
 
-    <script src="app-v56.js" defer></script>
+    <script src="app-v58.js" defer></script>
   </body>
 </html>
