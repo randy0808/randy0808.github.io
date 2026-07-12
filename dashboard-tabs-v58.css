@@ -1,0 +1,63 @@
+.dashboard-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.dashboard-tab {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.dashboard-tab:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.dashboard-tab.is-active {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: var(--text);
+}
+
+.dashboard-tab-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.dashboard-tab-panel[hidden] {
+  display: none !important;
+}
+
+.dashboard-tab-panel .summary-grid,
+.dashboard-tab-panel .workspace-grid {
+  margin-bottom: 0;
+}
+
+@media (max-width: 680px) {
+  .dashboard-tabs {
+    position: sticky;
+    top: calc(8px + env(safe-area-inset-top));
+    z-index: 10;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(14px);
+  }
+
+  .dashboard-tab {
+    min-height: 44px;
+    font-size: 1rem;
+  }
+}
