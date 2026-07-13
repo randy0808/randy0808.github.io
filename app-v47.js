@@ -64,6 +64,7 @@ const KIND_LABELS = {
 };
 
 const MONTH_LABELS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+const MONTHLY_DIVIDEND_SYMBOLS = new Set(["O", "SGOV"]);
 
 const CHART_COLORS = [
   "#0b7a75", "#2f6fed", "#b7791f", "#7b61ff", "#d95f43",
@@ -1121,11 +1122,13 @@ function renderEntryQuickStats(totals) {
       `;
     })
     .join("");
-  const formatPayoutMonths = (months) => Array.isArray(months) && months.length
-    ? months.map((monthIndex) => MONTH_LABELS[monthIndex]).join("、")
-    : "配息月份待補";
+  const formatPayoutMonths = (months) => {
+    if (!Array.isArray(months) || !months.length) return "配息月份待補";
+    if (months.length >= 12) return "每月";
+    return months.map((monthIndex) => MONTH_LABELS[monthIndex]).join("、");
+  };
   const topPayers = summary.payers
-    .slice(0, 10)
+    .slice(0, 12)
     .map((payer) => `
       <div class="dividend-payer-row">
         <span class="dividend-payer-identity">
@@ -1163,7 +1166,11 @@ function renderEntryQuickStats(totals) {
     </div>
     <div class="dividend-bottom-grid">
       <div class="dividend-payers">
-        <span>主要配息來源</span>
+        <div class="dividend-payer-header">
+          <span>主要配息來源</span>
+          <span>年領股息</span>
+          <span>殖利率</span>
+        </div>
         ${topPayers || `<small>暫無股息資料</small>`}
       </div>
       <div class="dividend-note">
@@ -1278,7 +1285,27 @@ function calculateDividendSummary(rows) {
     const currency = profile.currency || row.metrics.quoteCurrency || (row.position.kind === "tw-stock" ? "TWD" : "USD");
     const taxFactor = row.position.kind === "us-stock" ? 1 - US_DIVIDEND_TAX_RATE : 1;
     let annualValue = 0;
-    const monthAmounts = profile.monthAmounts && typeof profile.monthAmounts === "object" ? profile.monthAmounts : {};
+    let monthAmounts = profile.monthAmounts && typeof profile.monthAmounts === "object" ? { ...profile.monthAmounts } : {};
+    if (isKnownMonthlyDividend(row.position)) {
+      const observedAmounts = Object.values(monthAmounts)
+        .map(Number)
+        .filter((value) => Number.isFinite(value) && value > 0);
+      const annualPerShare = Number(profile.annualPerShare);
+      const monthlyFallback = observedAmounts.length
+        ? observedAmounts.reduce((sum, value) => sum + value, 0) / observedAmounts.length
+        : Number.isFinite(annualPerShare) && annualPerShare > 0
+          ? annualPerShare / 12
+          : 0;
+      if (monthlyFallback > 0) {
+        monthAmounts = { ...monthAmounts };
+        for (let index = 0; index < 12; index += 1) {
+          const existingAmount = Number(monthAmounts[index]);
+          if (!Number.isFinite(existingAmount) || existingAmount <= 0) {
+            monthAmounts[index] = monthlyFallback;
+          }
+        }
+      }
+    }
 
     for (const [monthIndex, amountPerShare] of Object.entries(monthAmounts)) {
       const index = Number(monthIndex);
@@ -2399,6 +2426,14 @@ function getMorningstarDividendTarget(position) {
   return { path: `stocks/${market}/${encodeURIComponent(symbol)}/dividends`, currency: "USD" };
 }
 
+function isKnownMonthlyDividend(position) {
+  if (position.kind !== "us-stock") return false;
+  const symbol = getYahooSymbol(position.marketSymbol || position.symbol, position.kind)
+    .replace("-", ".")
+    .toUpperCase();
+  return MONTHLY_DIVIDEND_SYMBOLS.has(symbol);
+}
+
 function parseMorningstarDividendEvents(markdown) {
   const rows = [];
   const rowPattern = /\|\s*([A-Z][a-z]{2}\s+\d{2},\s+\d{4})\s*\|[^|\n]*\|[^|\n]*\|\s*([A-Z][a-z]{2}\s+\d{2},\s+\d{4})\s*\|\s*Cash Dividend\s*\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|/g;
@@ -2436,9 +2471,17 @@ function buildDividendProfileFromEvents({ position, events, currency, price, sou
     monthAmounts[monthIndex] = (Number(monthAmounts[monthIndex]) || 0) + Number(event.amount);
   }
 
-  if (inferredFrequency === 12 && cycleEvents.length < 10 && events[0]) {
+  if (inferredFrequency === 12 && events[0]) {
+    const observedAmounts = Object.values(monthAmounts)
+      .map(Number)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const fallbackMonthlyAmount = observedAmounts.length
+      ? observedAmounts.reduce((sum, value) => sum + value, 0) / observedAmounts.length
+      : Number(events[0].amount);
     for (let index = 0; index < 12; index += 1) {
-      monthAmounts[index] = Number(events[0].amount);
+      if (!Number.isFinite(Number(monthAmounts[index])) || Number(monthAmounts[index]) <= 0) {
+        monthAmounts[index] = fallbackMonthlyAmount;
+      }
     }
   }
 
@@ -2464,6 +2507,7 @@ function buildDividendProfileFromEvents({ position, events, currency, price, sou
 }
 
 function inferDividendFrequency(events, position) {
+  if (isKnownMonthlyDividend(position)) return 12;
   if (!events.length) return 0;
   const recentCutoff = Date.now() - 395 * 24 * 60 * 60 * 1000;
   const recentCount = events.filter((event) => event.dateMs >= recentCutoff).length;
