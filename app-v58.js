@@ -6,7 +6,7 @@
 
   if (originalRegister) {
     serviceWorker.register = (url, options) => {
-      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v58.js");
+      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v59.js");
       return originalRegister(nextUrl, options);
     };
   }
@@ -101,13 +101,14 @@
       document.head.appendChild(stylesheet);
     }
 
-    if (!document.querySelector("#portfolioDigest")) {
-      const dividendPanel = document.querySelector(".dividend-panel");
-      const section = document.createElement("section");
-      section.className = "panel portfolio-digest-panel";
-      section.innerHTML = '<div id="portfolioDigest" class="portfolio-digest" aria-label="投組整理"></div>';
-      dividendPanel?.insertAdjacentElement("afterend", section);
+    if (!document.querySelector('link[href="overview-dividends-v59.css"]')) {
+      const stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = "overview-dividends-v59.css";
+      document.head.appendChild(stylesheet);
     }
+
+    document.querySelectorAll(".portfolio-digest-panel").forEach((panel) => panel.remove());
 
     ensureDashboardTabs();
   }
@@ -124,7 +125,6 @@
   }
 
   ensureV58Layout();
-  loadScript("app-v47.js?v=58")
-    .then(() => loadScript("portfolio-digest-v57.js"))
+  loadScript("app-v47.js?v=59")
     .catch((error) => console.warn("WealthTrack v58 patch failed", error));
 })();
