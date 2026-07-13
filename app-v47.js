@@ -265,6 +265,7 @@ const dom = {
   tokenSettingsSummary: document.querySelector("#tokenSettingsSummary"),
   allocationTotal: document.querySelector("#allocationTotal"),
   entryQuickStats: document.querySelector("#entryQuickStats"),
+  portfolioDigest: document.querySelector("#portfolioDigest"),
   allocationChart: document.querySelector("#allocationChart"),
   allocationInsights: document.querySelector("#allocationInsights"),
   allocationLegend: document.querySelector("#allocationLegend"),
@@ -666,6 +667,11 @@ function formatPercent(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function formatPlainPercent(value, maximumFractionDigits = 1) {
+  if (!Number.isFinite(value)) return "--";
+  return `${value.toFixed(maximumFractionDigits)}%`;
+}
+
 function valueClass(value) {
   if (!Number.isFinite(value) || value === 0) return "";
   return value > 0 ? "profit-positive" : "profit-negative";
@@ -1009,6 +1015,7 @@ function render() {
 
   renderStatus(totals);
   renderEntryQuickStats(totals);
+  renderPortfolioDigest(totals);
   renderRows();
   updateSortButtons();
   drawAllocationChart();
@@ -1114,11 +1121,17 @@ function renderEntryQuickStats(totals) {
       `;
     })
     .join("");
+  const formatPayoutMonths = (months) => Array.isArray(months) && months.length
+    ? months.map((monthIndex) => MONTH_LABELS[monthIndex]).join("、")
+    : "配息月份待補";
   const topPayers = summary.payers
-    .slice(0, 4)
+    .slice(0, 10)
     .map((payer) => `
       <div class="dividend-payer-row">
-        <span>${escapeHtml(payer.symbol)}</span>
+        <span class="dividend-payer-identity">
+          <strong>${escapeHtml(payer.symbol)}</strong>
+          <small>${escapeHtml(formatPayoutMonths(payer.months))}</small>
+        </span>
         <strong class="${sensitiveClass(payer.annualValue)}">${formatWholeSensitiveCurrency(payer.annualValue)}</strong>
         <small>${Number.isFinite(payer.yieldPercent) && payer.yieldPercent > 0 ? payer.yieldPercent.toFixed(2) : "--"}%</small>
       </div>
@@ -1156,6 +1169,87 @@ function renderEntryQuickStats(totals) {
       <div class="dividend-note">
         <strong>${missingCount ? `${missingCount} 檔缺資料` : "以最近配息推估"}</strong>
         <small>美股已預扣 30% 股息稅；台股未扣二代健保、匯費。資料每日更新一次。</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderPortfolioDigest(totals) {
+  if (!dom.portfolioDigest) return;
+
+  const rows = state.positions.map((position) => {
+    const metrics = calculatePosition(position);
+    const allocationPercent = totals.value > 0 && Number.isFinite(metrics.currentValue)
+      ? (metrics.currentValue / totals.value) * 100
+      : NaN;
+    return { position, metrics, allocationPercent };
+  });
+
+  if (!rows.length) {
+    dom.portfolioDigest.innerHTML = `
+      <div class="digest-head">
+        <h3>投組整理</h3>
+        <span>等待資產</span>
+      </div>
+      <div class="quick-empty">新增資產後，這裡會整理報價狀態、股息資料和需要優先注意的部位。</div>
+    `;
+    return;
+  }
+
+  const pricedRows = rows
+    .filter((row) => Number.isFinite(row.metrics.currentValue))
+    .sort((a, b) => b.metrics.currentValue - a.metrics.currentValue);
+  const profitRows = rows
+    .filter((row) => Number.isFinite(row.metrics.profitPercent))
+    .sort((a, b) => a.metrics.profitPercent - b.metrics.profitPercent);
+  const largest = pricedRows[0];
+  const pressure = profitRows[0];
+  const best = profitRows.length ? profitRows[profitRows.length - 1] : null;
+  const missingQuotes = rows.filter((row) => !Number.isFinite(row.metrics.currentValue));
+  const dividendRows = getDividendRows();
+  const dividendSummary = calculateDividendSummary(dividendRows);
+  const dividendStatus = dividendRows.length ? `${dividendSummary.readyCount}/${dividendRows.length}` : "--";
+  const dividendNote = dividendRows.length
+    ? (dividendSummary.missingCount ? `${dividendSummary.missingCount} 檔待補` : "資料完整")
+    : "沒有股票部位";
+  const quoteNote = missingQuotes.length
+    ? missingQuotes.slice(0, 4).map((row) => row.position.symbol).join("、")
+    : "全部可計價";
+  const makeCard = (label, main, sub, className = "") => `
+    <div class="digest-card">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${className}">${main}</strong>
+      <small>${sub}</small>
+    </div>
+  `;
+
+  dom.portfolioDigest.innerHTML = `
+    <div class="digest-head">
+      <h3>投組整理</h3>
+      <span>${state.lastSync ? `更新 ${formatTime(state.lastSync)}` : "尚未更新"}</span>
+    </div>
+    <div class="digest-card-grid">
+      ${makeCard(
+        "最大部位",
+        largest ? escapeHtml(largest.position.symbol) : "--",
+        largest ? `${formatPlainPercent(largest.allocationPercent)} · ${formatCompactCurrency(largest.metrics.currentValue)}` : "--"
+      )}
+      ${makeCard(
+        "壓力最大",
+        pressure ? escapeHtml(pressure.position.symbol) : "--",
+        pressure ? `${formatPercent(pressure.metrics.profitPercent)} · ${formatWholeSensitiveCurrency(pressure.metrics.profit)}` : "--",
+        pressure ? valueClass(pressure.metrics.profitPercent) : ""
+      )}
+      ${makeCard("股息資料", dividendStatus, dividendNote)}
+    </div>
+    <div class="digest-row-grid">
+      <div class="digest-row">
+        <span>報價待補</span>
+        <strong>${escapeHtml(quoteNote)}</strong>
+      </div>
+      <div class="digest-row">
+        <span>表現最好</span>
+        <strong class="${best ? valueClass(best.metrics.profitPercent) : ""}">${best ? `${escapeHtml(best.position.symbol)} ${formatPercent(best.metrics.profitPercent)}` : "--"}</strong>
       </div>
     </div>
   `;
@@ -1204,7 +1298,11 @@ function calculateDividendSummary(rows) {
       payers.push({
         symbol: row.position.symbol,
         annualValue,
-        yieldPercent: Number(profile.yieldPercent) * taxFactor
+        yieldPercent: Number(profile.yieldPercent) * taxFactor,
+        months: Object.keys(monthAmounts)
+          .map(Number)
+          .filter((index) => Number.isInteger(index) && index >= 0 && index <= 11)
+          .sort((a, b) => a - b)
       });
     }
   }
