@@ -6,7 +6,7 @@
 
   if (originalRegister) {
     serviceWorker.register = (url, options) => {
-      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v70.js");
+      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v71.js");
       return originalRegister(nextUrl, options);
     };
   }
@@ -132,8 +132,9 @@
   }
 
   ensureV58Layout();
-  loadScript("app-v47.js?v=70")
-    .then(() => loadScript("overview-dividends-fix-v70.js?v=70"))
-    .then(() => loadScript("holdings-sticky-v65.js?v=70"))
+  loadScript("app-v47.js?v=71")
+    .then(() => loadScript("overview-dividends-fix-v70.js?v=71"))
+    .then(() => loadScript("dividend-scroll-v71.js?v=71"))
+    .then(() => loadScript("holdings-sticky-v65.js?v=71"))
     .catch((error) => console.warn("WealthTrack v58 patch failed", error));
 })();
