@@ -1,0 +1,179 @@
+.workspace-column-main {
+  align-content: stretch;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.workspace-column-main .dividend-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dividend-panel .entry-quick-stats {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(230px, 1fr);
+}
+
+.portfolio-digest-panel,
+.dividend-note {
+  display: none !important;
+}
+
+.dividend-bottom-grid {
+  min-height: 0;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  margin-top: 0;
+}
+
+.dividend-payers {
+  min-height: 0;
+  align-content: start;
+  overflow: hidden;
+  padding-right: 0;
+}
+
+.dividend-payer-header,
+.dividend-payer-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(12rem, 1.18fr) minmax(8rem, 0.72fr) minmax(5.5rem, 0.46fr);
+  align-items: center;
+  column-gap: clamp(18px, 4vw, 56px);
+}
+
+.dividend-payer-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 0 9px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  background: var(--panel);
+}
+
+.dividend-payer-header > span:first-child {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dividend-payer-header > span:first-child small {
+  min-width: min(100%, 34rem);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.dividend-payer-header > span:nth-child(2),
+.dividend-payer-row > strong {
+  justify-self: end;
+  text-align: right;
+}
+
+.dividend-payer-header > span:nth-child(3),
+.dividend-payer-row > small {
+  justify-self: end;
+  text-align: right;
+}
+
+.dividend-payer-row {
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+
+.dividend-payer-header + .dividend-payer-row,
+.dividend-payer-row:first-of-type {
+  border-top: 0;
+}
+
+.dividend-payer-identity {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.dividend-payer-identity strong,
+.dividend-payer-identity small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dividend-payer-identity strong {
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.dividend-payer-identity small {
+  color: var(--muted);
+  text-align: left;
+  font-size: 0.73rem;
+  font-weight: 720;
+}
+
+.dividend-payer-row > strong {
+  font-size: 1rem;
+}
+
+.dividend-payer-row > small {
+  min-width: 4.5em;
+}
+
+@media (min-width: 1101px) {
+  .dividend-payers {
+    max-height: clamp(300px, 25vw, 410px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (max-width: 1100px) {
+  .workspace-column-main {
+    grid-template-rows: auto;
+  }
+
+  .dividend-panel .entry-quick-stats {
+    display: flex;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 780px) {
+  .dividend-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dividend-payers {
+    max-height: clamp(360px, 54vh, 560px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .dividend-payer-header {
+    grid-template-columns: minmax(0, 1fr) minmax(6.5em, auto) minmax(4.5em, auto);
+    column-gap: 12px;
+  }
+
+  .dividend-payer-header > span:first-child {
+    display: grid;
+    gap: 4px;
+  }
+
+  .dividend-payer-row {
+    grid-template-columns: minmax(0, 1fr) minmax(6.5em, auto) minmax(4.5em, auto);
+    column-gap: 12px;
+    row-gap: 4px;
+  }
+}
