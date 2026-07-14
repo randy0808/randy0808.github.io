@@ -4,7 +4,7 @@
   window[PATCH_KEY] = true;
 
   const MONTHLY_SYMBOLS_V75 = new Set(["O", "SGOV"]);
-  const DIVIDEND_SOURCE_NOTE_V75 = "美股已預扣 30% 股息稅；台股未扣二代健保、匯費；資料每日更新一次。";
+  const DIVIDEND_SOURCE_NOTE_V75 = "美股以 Payable Date 配發月估算並預扣 30% 股息稅；複委託實際入帳可能晚 1-3 個工作天；台股未扣二代健保、匯費。";
   const DIVIDEND_SORT_STORAGE_KEY = "wealthtrack.dividendSortMode";
   const DIVIDEND_SORT_DEFAULTS = {
     source: "asc",
