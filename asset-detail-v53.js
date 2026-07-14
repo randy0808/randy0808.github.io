@@ -4,6 +4,55 @@ const STORAGE_KEY = "wealthtrack.v1";
 const FALLBACK_USD_TWD = 31.2;
 const GITHUB_API_BASE = "https://api.github.com";
 const FINANCIAL_TABLE_COLSPAN = 7;
+const FUNDAMENTALS_CACHE_PREFIX = "wealthtrack.fundamentals.";
+const FUNDAMENTALS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const SEC_JSON_TIMEOUT_MS = 38_000;
+
+const SEC_STATIC_CIKS = {
+  AAPL: 320193,
+  AMD: 2488,
+  AMZN: 1018724,
+  ASML: 937966,
+  AWR: 1056903,
+  BA: 12927,
+  BAC: 70858,
+  BEN: 38777,
+  "BRK-B": 1067983,
+  CCL: 815097,
+  COST: 909832,
+  DIS: 1744489,
+  EL: 1001250,
+  GIS: 40704,
+  GOOG: 1652044,
+  GOOGL: 1652044,
+  HRL: 48465,
+  INTC: 50863,
+  JNJ: 200406,
+  JPM: 19617,
+  KHC: 1637459,
+  KO: 21344,
+  MA: 1141391,
+  MCD: 63908,
+  META: 1326801,
+  MMM: 66740,
+  MSFT: 789019,
+  NOK: 924613,
+  NVDA: 1045810,
+  O: 726728,
+  PEP: 77476,
+  PG: 80424,
+  SBUX: 829224,
+  T: 732717,
+  TSM: 1046179,
+  TSLA: 1318605,
+  V: 1403161,
+  WFC: 72971,
+  WMT: 104169,
+  WTI: 1288403,
+  WTRG: 78128,
+  XOM: 34088,
+  YORW: 108985
+};
 
 const KIND_LABELS = {
   crypto: "加密貨幣",
@@ -238,6 +287,11 @@ async function loadFundamentals() {
     dom.fundamentalTableBody.innerHTML = emptyRow("這類資產沒有 EPS、ROE、FCF 等公司財報欄位", FINANCIAL_TABLE_COLSPAN);
     return;
   }
+  const cached = getCachedFundamentals(position);
+  if (cached?.rows?.length) {
+    renderFundamentalTable(cached.rows);
+    dom.fundamentalStatus.textContent = `${cached.source || "財報資料"} 快取`;
+  }
   dom.fundamentalStatus.textContent = "讀取中";
   try {
     const results = await Promise.allSettled([
@@ -260,9 +314,15 @@ async function loadFundamentals() {
           : "資料不足";
     renderFundamentalTable(rows);
     dom.fundamentalStatus.textContent = rows.length ? source : "資料不足";
+    if (rows.length) setCachedFundamentals(position, rows, source);
   } catch (error) {
-    dom.fundamentalStatus.textContent = "讀取失敗";
-    dom.fundamentalTableBody.innerHTML = emptyRow("財報資料暫時無法取得", FINANCIAL_TABLE_COLSPAN);
+    if (cached?.rows?.length) {
+      renderFundamentalTable(cached.rows);
+      dom.fundamentalStatus.textContent = `${cached.source || "財報資料"} 快取`;
+    } else {
+      dom.fundamentalStatus.textContent = "讀取失敗";
+      dom.fundamentalTableBody.innerHTML = emptyRow("財報資料暫時無法取得", FINANCIAL_TABLE_COLSPAN);
+    }
   }
 }
 
@@ -285,7 +345,11 @@ function mergeFundamentalRows(primaryRows, secondaryRows) {
 }
 
 function firstFinite(...values) {
-  return values.find((value) => Number.isFinite(Number(value)));
+  return values.find(isFiniteValue);
+}
+
+function isFiniteValue(value) {
+  return value !== null && value !== "" && Number.isFinite(Number(value));
 }
 
 function isReasonableReportYear(year) {
@@ -403,7 +467,7 @@ async function fetchSecFundamentals(target) {
   const cik = await findCik(target.marketSymbol || target.symbol);
   if (!cik) return [];
   const padded = String(cik).padStart(10, "0");
-  const facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, { fallbackProxy: true, timeoutMs: 16_000 });
+  const facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, { fallbackProxy: true, timeoutMs: SEC_JSON_TIMEOUT_MS });
   const gaap = facts?.facts?.["us-gaap"] || {};
   const eps = annualConcept(gaap, [
     "EarningsPerShareDiluted",
@@ -557,7 +621,7 @@ async function fetchSecInlineCapex(cik) {
   for (const filing of filings.slice(0, 8)) {
     try {
       const url = secArchiveUrl(cik, filing.accession, filing.doc);
-      const html = await fetchSecArchiveText(url, { timeoutMs: 16_000 });
+      const html = await fetchSecArchiveText(url, { timeoutMs: SEC_JSON_TIMEOUT_MS });
       const facts = parseSecFilingCapexFacts(html);
       facts.forEach((value, year) => {
         if (!byYear.has(year)) byYear.set(year, value);
@@ -575,7 +639,7 @@ async function fetchSecTextEps(cik) {
   for (const filing of filings.slice(0, 8)) {
     try {
       const url = secArchiveUrl(cik, filing.accession, filing.doc);
-      const html = await fetchSecArchiveText(url, { timeoutMs: 16_000 });
+      const html = await fetchSecArchiveText(url, { timeoutMs: SEC_JSON_TIMEOUT_MS });
       const facts = parseSecTextEpsFacts(html);
       facts.forEach((value, year) => {
         if (!byYear.has(year)) byYear.set(year, value);
@@ -589,12 +653,12 @@ async function fetchSecTextEps(cik) {
 
 async function fetchSecTenKFilings(cik) {
   const padded = String(cik).padStart(10, "0");
-  const data = await fetchJson(`https://data.sec.gov/submissions/CIK${padded}.json`, { fallbackProxy: true, timeoutMs: 14_000 });
+  const data = await fetchJson(`https://data.sec.gov/submissions/CIK${padded}.json`, { fallbackProxy: true, timeoutMs: SEC_JSON_TIMEOUT_MS });
   const filings = extractTenKFilings(data?.filings?.recent);
   const oldFile = data?.filings?.files?.[0]?.name;
   if (oldFile && filings.length < 12) {
     try {
-      const oldData = await fetchJson(`https://data.sec.gov/submissions/${oldFile}`, { fallbackProxy: true, timeoutMs: 14_000 });
+      const oldData = await fetchJson(`https://data.sec.gov/submissions/${oldFile}`, { fallbackProxy: true, timeoutMs: SEC_JSON_TIMEOUT_MS });
       filings.push(...extractTenKFilings(oldData));
     } catch (error) {
       // Recent filings usually cover the visible decade; old index is a best-effort backfill.
@@ -610,7 +674,7 @@ function extractTenKFilings(filings) {
   const forms = filings?.form || [];
   const results = [];
   for (let index = 0; index < forms.length; index += 1) {
-    if (forms[index] !== "10-K") continue;
+    if (!isAnnualReportForm(forms[index])) continue;
     results.push({
       filingDate: filings.filingDate?.[index],
       reportDate: filings.reportDate?.[index],
@@ -626,13 +690,8 @@ function secArchiveUrl(cik, accession, doc) {
 }
 
 async function fetchSecArchiveText(url, options = {}) {
-  const { timeoutMs = 16_000 } = options;
-  try {
-    return await fetchText(url, { timeoutMs });
-  } catch (error) {
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    return fetchText(proxyUrl, { timeoutMs });
-  }
+  const { timeoutMs = SEC_JSON_TIMEOUT_MS } = options;
+  return fetchTextWithFallback(url, { timeoutMs });
 }
 
 function parseSecInlineCapexFacts(html) {
@@ -877,8 +936,13 @@ function parseYahooFundamentalRows(data) {
 
 async function findCik(symbol) {
   const wanted = normalizeSecTicker(symbol);
-  const data = await fetchJson("https://www.sec.gov/files/company_tickers.json", { fallbackProxy: true, timeoutMs: 14_000 });
-  return Object.values(data || {}).find((row) => normalizeSecTicker(row.ticker) === wanted)?.cik_str || null;
+  if (SEC_STATIC_CIKS[wanted]) return SEC_STATIC_CIKS[wanted];
+  try {
+    const data = await fetchJson("https://www.sec.gov/files/company_tickers.json", { fallbackProxy: true, timeoutMs: SEC_JSON_TIMEOUT_MS });
+    return Object.values(data || {}).find((row) => normalizeSecTicker(row.ticker) === wanted)?.cik_str || null;
+  } catch (error) {
+    return null;
+  }
 }
 
 function annualConcept(gaap, conceptNames, unitMatches) {
@@ -892,7 +956,7 @@ function annualConcept(gaap, conceptNames, unitMatches) {
         const year = annualFactYear(fact);
         if (!isReasonableReportYear(year)) return;
         if (fact.fp && fact.fp !== "FY") return;
-        if (!String(fact.form || "").startsWith("10-K")) return;
+        if (!isAnnualReportForm(fact.form)) return;
         const value = Number(fact.val);
         if (!Number.isFinite(value)) return;
         const candidate = {
@@ -910,6 +974,10 @@ function annualConcept(gaap, conceptNames, unitMatches) {
     });
   });
   return new Map([...byYear.entries()].map(([year, fact]) => [year, fact.value]));
+}
+
+function isAnnualReportForm(form) {
+  return /^(10-K|20-F|40-F)/i.test(String(form || ""));
 }
 
 function annualFactYear(fact) {
@@ -1264,6 +1332,59 @@ function getCachedDividendProfile(item) {
   return state.dividends?.profiles?.[dividendKey(item)] || null;
 }
 
+function getCachedFundamentals(item) {
+  try {
+    const raw = localStorage.getItem(fundamentalsCacheKey(item));
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    const rows = sanitizeFundamentalRows(payload.rows);
+    if (!rows.length) return null;
+    if (Date.now() - Number(payload.savedAt || 0) > FUNDAMENTALS_CACHE_TTL_MS) return null;
+    return { ...payload, rows };
+  } catch (error) {
+    return null;
+  }
+}
+
+function setCachedFundamentals(item, rows, source) {
+  try {
+    const payload = {
+      savedAt: Date.now(),
+      source,
+      rows: sanitizeFundamentalRows(rows).slice(0, 10)
+    };
+    localStorage.setItem(fundamentalsCacheKey(item), JSON.stringify(payload));
+  } catch (error) {
+    // Ignore storage quota and private mode errors.
+  }
+}
+
+function sanitizeFundamentalRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => {
+    const year = Number(row?.year);
+    if (!isReasonableReportYear(year)) return null;
+    return {
+      year,
+      eps: finiteOrUndefined(row.eps),
+      epsGrowth: finiteOrUndefined(row.epsGrowth),
+      roe: finiteOrUndefined(row.roe),
+      fcf: finiteOrUndefined(row.fcf),
+      netMargin: finiteOrUndefined(row.netMargin),
+      interestCoverage: finiteOrUndefined(row.interestCoverage)
+    };
+  }).filter(Boolean);
+}
+
+function finiteOrUndefined(value) {
+  if (!isFiniteValue(value)) return undefined;
+  return Number(value);
+}
+
+function fundamentalsCacheKey(item) {
+  return `${FUNDAMENTALS_CACHE_PREFIX}${getYahooSymbol(item.marketSymbol || item.symbol, item.kind).toUpperCase()}`;
+}
+
 function dividendKey(item) {
   return `dividend:${item.kind}:${getYahooSymbol(item.marketSymbol || item.symbol, item.kind).toUpperCase()}`;
 }
@@ -1337,13 +1458,19 @@ async function fetchJson(url, options = {}) {
     return await fetchJsonDirect(url, timeoutMs);
   } catch (error) {
     if (!fallbackProxy) throw error;
-    try {
-      const text = await fetchText(`https://r.jina.ai/http://${url}`, { timeoutMs });
-      return parseJsonFromText(text);
-    } catch (readerError) {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      return fetchJsonDirect(proxyUrl, timeoutMs);
+    let lastError = error;
+    for (const proxyUrl of jsonProxyUrls(url)) {
+      try {
+        if (proxyUrl.reader) {
+          const text = await fetchText(proxyUrl.url, { timeoutMs });
+          return parseJsonFromText(text);
+        }
+        return await fetchJsonDirect(proxyUrl.url, timeoutMs);
+      } catch (proxyError) {
+        lastError = proxyError;
+      }
     }
+    throw lastError;
   }
 }
 
@@ -1377,13 +1504,34 @@ async function fetchTextWithFallback(url, options = {}) {
   try {
     return await fetchText(url, { timeoutMs });
   } catch (error) {
-    try {
-      return await fetchText(`https://r.jina.ai/http://${url}`, { timeoutMs });
-    } catch (readerError) {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      return fetchText(proxyUrl, { timeoutMs });
+    let lastError = error;
+    for (const proxyUrl of textProxyUrls(url)) {
+      try {
+        return await fetchText(proxyUrl, { timeoutMs });
+      } catch (proxyError) {
+        lastError = proxyError;
+      }
     }
+    throw lastError;
   }
+}
+
+function jsonProxyUrls(url) {
+  return [
+    { url: `https://r.jina.ai/http://${url}`, reader: true },
+    { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
+    { url: `https://corsproxy.io/?${encodeURIComponent(url)}` },
+    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}` }
+  ];
+}
+
+function textProxyUrls(url) {
+  return [
+    `https://r.jina.ai/http://${url}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+  ];
 }
 
 function parseJsonFromText(text) {
