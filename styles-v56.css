@@ -1221,6 +1221,10 @@ select:focus {
   border-collapse: collapse;
 }
 
+.financial-table {
+  min-width: 780px;
+}
+
 .detail-table th,
 .detail-table td {
   white-space: nowrap;
@@ -1229,6 +1233,16 @@ select:focus {
 .detail-table th:first-child,
 .detail-table td:first-child {
   text-align: left;
+}
+
+.financial-average-row td {
+  background: var(--panel-soft);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.financial-average-row td:first-child {
+  color: var(--primary);
 }
 
 .detail-empty {
