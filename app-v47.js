@@ -171,6 +171,7 @@ let autoSyncTimer = null;
 
 const SORT_DEFAULT_DIRECTIONS = {
   asset: "asc",
+  currentDividendYield: "desc",
   allocationPercent: "desc",
   quantity: "desc",
   averageCost: "desc",
@@ -182,6 +183,7 @@ const SORT_DEFAULT_DIRECTIONS = {
 
 const DEFAULT_COLUMN_ORDER = [
   "asset",
+  "currentDividendYield",
   "allocationPercent",
   "quantity",
   "averageCost",
@@ -192,6 +194,7 @@ const DEFAULT_COLUMN_ORDER = [
 
 const DATA_COLUMNS = [
   { id: "asset", label: "資產", sortField: "asset", align: "left" },
+  { id: "currentDividendYield", label: "當前殖利率", sortField: "currentDividendYield", align: "right" },
   { id: "allocationPercent", label: "佔比", sortField: "allocationPercent", align: "right" },
   { id: "quantity", label: "數量", sortField: "quantity", align: "right" },
   { id: "averageCost", label: "平均成本", sortField: "averageCost", align: "right" },
@@ -710,10 +713,49 @@ function convertUnitForDisplay(value, sourceCurrency, position) {
   };
 }
 
+function latestDividendPerShare(profile) {
+  const direct = Number(profile?.lastDividendPerShare);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const annualPerShare = Number(profile?.annualPerShare);
+  const frequency = Number(profile?.frequency);
+  if (Number.isFinite(annualPerShare) && annualPerShare > 0 && Number.isFinite(frequency) && frequency > 0) {
+    return annualPerShare / frequency;
+  }
+
+  const monthAmounts = profile?.monthAmounts && typeof profile.monthAmounts === "object"
+    ? Object.values(profile.monthAmounts).map(Number).filter((value) => Number.isFinite(value) && value > 0)
+    : [];
+  if (monthAmounts.length) {
+    return monthAmounts.reduce((sum, value) => sum + value, 0) / monthAmounts.length;
+  }
+
+  return NaN;
+}
+
+function currentDividendYieldAtPrice(position, quotePrice, quoteCurrency) {
+  if (position.kind !== "us-stock" && position.kind !== "tw-stock") return NaN;
+  const profile = state.dividends.profiles[dividendKey(position)];
+  if (!profile || profile.error) return NaN;
+
+  const lastDividend = latestDividendPerShare(profile);
+  const frequency = Number(profile.frequency);
+  const annualPerShare = Number.isFinite(lastDividend) && lastDividend > 0 && Number.isFinite(frequency) && frequency > 0
+    ? lastDividend * frequency
+    : Number(profile.annualPerShare);
+  const dividendCurrency = profile.currency || (position.kind === "tw-stock" ? "TWD" : "USD");
+  const annualInQuoteCurrency = convertCurrency(annualPerShare, dividendCurrency, quoteCurrency || dividendCurrency);
+
+  if (!Number.isFinite(annualInQuoteCurrency) || annualInQuoteCurrency <= 0) return NaN;
+  if (!Number.isFinite(quotePrice) || quotePrice <= 0) return NaN;
+  return (annualInQuoteCurrency / quotePrice) * 100;
+}
+
 function calculatePosition(position) {
   const quote = getQuote(position);
   const quoteCurrency = quote?.currency || position.manualCurrency || state.baseCurrency;
   const price = Number(quote?.price);
+  const currentDividendYield = currentDividendYieldAtPrice(position, price, quoteCurrency);
   const currentValue = Number.isFinite(price)
     ? convertCurrency(price * position.quantity, quoteCurrency, state.baseCurrency)
     : NaN;
@@ -726,6 +768,7 @@ function calculatePosition(position) {
   return {
     quote,
     quoteCurrency,
+    currentDividendYield,
     currentValue,
     costValue,
     profit,
@@ -1457,6 +1500,10 @@ function renderCell(columnId, position, metrics) {
     `;
   }
 
+  if (columnId === "currentDividendYield") {
+    return `<td class="${valueClass(metrics.currentDividendYield)}">${Number.isFinite(metrics.currentDividendYield) ? `${metrics.currentDividendYield.toFixed(2)}%` : "--"}</td>`;
+  }
+
   if (columnId === "allocationPercent") {
     return `<td class="${valueClass(allocationPercent)}">${Number.isFinite(allocationPercent) ? allocationPercent.toFixed(1) : "--"}%</td>`;
   }
@@ -1595,6 +1642,7 @@ function sortRows(rows) {
 
 function sortValue(row, field) {
   if (field === "quantity") return Number(row.position.quantity);
+  if (field === "currentDividendYield") return Number(row.metrics.currentDividendYield);
   if (field === "allocationPercent") return Number(row.allocationPercent);
   if (field === "averageCost") {
     const costCurrency = positionCostCurrency(row.position, row.metrics.quoteCurrency);
@@ -2493,6 +2541,7 @@ function buildDividendProfileFromEvents({ position, events, currency, price, sou
       symbol: position.symbol,
       currency,
       annualPerShare: 0,
+      lastDividendPerShare: 0,
       yieldPercent: 0,
       monthAmounts: {},
       months: [],
@@ -2536,6 +2585,7 @@ function buildDividendProfileFromEvents({ position, events, currency, price, sou
     symbol: position.symbol,
     currency,
     annualPerShare,
+    lastDividendPerShare: Number(events[0]?.amount) || 0,
     yieldPercent,
     monthAmounts,
     months: Object.keys(monthAmounts).map(Number).sort((a, b) => a - b),
@@ -2760,6 +2810,7 @@ function spreadsheetRows() {
     "類型",
     "代號",
     "名稱",
+    "當前殖利率",
     "數量",
     "平均成本",
     "成本幣別",
@@ -2782,6 +2833,7 @@ function spreadsheetRows() {
       KIND_LABELS[position.kind] || position.kind,
       position.symbol,
       position.name,
+      Number.isFinite(metrics.currentDividendYield) ? `${metrics.currentDividendYield.toFixed(2)}%` : "",
       Number(position.quantity),
       averageCostDisplay.value,
       averageCostDisplay.currency,
