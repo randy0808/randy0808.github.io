@@ -1603,20 +1603,27 @@ th {
 
 .asset-cell {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(120px, 1fr);
   align-items: center;
   gap: 10px;
+  min-width: 188px;
 }
 
 .asset-badge {
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
   border-radius: 8px;
   background: var(--panel-soft);
   color: var(--primary);
+  font-size: 0.96rem;
   font-weight: 850;
+  line-height: 1;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .asset-title {
