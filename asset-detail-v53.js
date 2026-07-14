@@ -469,7 +469,7 @@ async function fetchSecFundamentals(target) {
   const padded = String(cik).padStart(10, "0");
   const facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, { fallbackProxy: true, timeoutMs: SEC_JSON_TIMEOUT_MS });
   const gaap = facts?.facts?.["us-gaap"] || {};
-  const eps = annualConcept(gaap, [
+  let eps = annualConcept(gaap, [
     "EarningsPerShareDiluted",
     "EarningsPerShareBasic",
     "EarningsPerShareBasicAndDiluted",
@@ -504,6 +504,14 @@ async function fetchSecFundamentals(target) {
     "NetIncomeLossAttributableToParent",
     "IncomeLossFromContinuingOperations"
   ], (unit) => unit === "USD");
+  const dilutedShares = annualConcept(gaap, [
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "WeightedAverageNumberOfShareDiluted",
+    "WeightedAverageDilutedSharesOutstanding",
+    "WeightedAverageNumberDilutedSharesOutstanding",
+    "WeightedAverageNumberOfSharesOutstandingDiluted"
+  ], (unit) => unit.toLowerCase().includes("shares"));
+  eps = mergeValueMaps(eps, computeEpsFromIncome(netIncome, dilutedShares));
   const equity = annualConcept(gaap, [
     "StockholdersEquity",
     "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
@@ -848,6 +856,18 @@ function mergeValueMaps(primary, fallback) {
     if (Number.isFinite(Number(value))) merged.set(year, value);
   });
   return merged;
+}
+
+function computeEpsFromIncome(netIncome, dilutedShares) {
+  const byYear = new Map();
+  netIncome.forEach((income, year) => {
+    const shares = Number(dilutedShares.get(year));
+    const value = Number(income);
+    if (Number.isFinite(value) && Number.isFinite(shares) && shares > 0) {
+      byYear.set(year, value / shares);
+    }
+  });
+  return byYear;
 }
 
 async function fetchYahooFundamentals(target) {
