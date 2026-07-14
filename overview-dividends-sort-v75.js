@@ -13,18 +13,19 @@
     dividendShare: "desc"
   };
   let dividendPayerScrollTopV75 = 0;
+  let dividendPayerIsRestoringV75 = false;
 
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=77")) {
-        existing.href = "overview-dividends-sort-v75.css?v=77";
+      if (!String(existing.getAttribute("href") || "").includes("v=78")) {
+        existing.href = "overview-dividends-sort-v75.css?v=78";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=77";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=78";
     document.head.appendChild(stylesheet);
   }
 
@@ -45,6 +46,7 @@
     if (!scroller || scroller.__wealthtrackDividendScrollV75) return;
     scroller.__wealthtrackDividendScrollV75 = true;
     scroller.addEventListener("scroll", () => {
+      if (dividendPayerIsRestoringV75) return;
       dividendPayerScrollTopV75 = scroller.scrollTop;
     }, { passive: true });
   }
@@ -54,17 +56,17 @@
     if (!scroller) return;
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const nextTop = Math.min(Math.max(0, Number(scrollTop) || 0), maxScroll);
+    if (Math.abs(scroller.scrollTop - nextTop) < 1) return;
+    dividendPayerIsRestoringV75 = true;
     scroller.scrollTop = nextTop;
     dividendPayerScrollTopV75 = nextTop;
+    requestAnimationFrame(() => {
+      dividendPayerIsRestoringV75 = false;
+    });
   }
 
   function restoreDividendPayerScrollSoonV75(scrollTop = dividendPayerScrollTopV75) {
-    restoreDividendPayerScrollV75(scrollTop);
     requestAnimationFrame(() => restoreDividendPayerScrollV75(scrollTop));
-    setTimeout(() => restoreDividendPayerScrollV75(scrollTop), 0);
-    setTimeout(() => restoreDividendPayerScrollV75(scrollTop), 80);
-    setTimeout(() => restoreDividendPayerScrollV75(scrollTop), 220);
-    setTimeout(() => restoreDividendPayerScrollV75(scrollTop), 360);
   }
 
   function readDividendSortModeV75() {
