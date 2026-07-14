@@ -15,10 +15,16 @@
   let dividendPayerScrollTopV75 = 0;
 
   function ensureDividendSortStyles() {
-    if (document.querySelector('link[href="overview-dividends-sort-v75.css"]')) return;
+    const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
+    if (existing) {
+      if (!String(existing.getAttribute("href") || "").includes("v=77")) {
+        existing.href = "overview-dividends-sort-v75.css?v=77";
+      }
+      return;
+    }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=77";
     document.head.appendChild(stylesheet);
   }
 
