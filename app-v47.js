@@ -10,6 +10,7 @@ const STOCK_QUOTE_CONCURRENCY = 1;
 const STOCK_QUOTE_DELAY_MS = 1_800;
 const DIVIDEND_CACHE_MS = 24 * 60 * 60 * 1000;
 const DIVIDEND_FETCH_DELAY_MS = 350;
+const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const HISTORY_START_DATE = "2026-07-10";
 const HISTORY_MAX_POINTS = 2_500;
@@ -2284,6 +2285,7 @@ function dividendKey(position) {
 
 function dividendProfileIsFresh(profile) {
   if (!profile || profile.error) return false;
+  if (profile.methodVersion !== DIVIDEND_PROFILE_METHOD_VERSION) return false;
   return profile?.asOf && Date.now() - Number(profile.asOf) < DIVIDEND_CACHE_MS;
 }
 
@@ -2317,6 +2319,7 @@ async function refreshDividendProfiles(options = {}) {
           yieldPercent: 0,
           monthAmounts: {},
           source: "股息資料暫缺",
+          methodVersion: DIVIDEND_PROFILE_METHOD_VERSION,
           asOf: Date.now(),
           error: true,
           errorMessage: error.message || "無法取得股息資料"
@@ -2348,6 +2351,16 @@ function handleRefreshClick() {
 window.wealthtrackManualRefresh = handleRefreshClick;
 
 async function fetchDividendProfile(position) {
+  if (position.kind === "us-stock") {
+    try {
+      const morningstarProfile = await fetchMorningstarDividendProfile(position);
+      const hasPaymentMonths = Object.keys(morningstarProfile.monthAmounts || {}).length > 0;
+      if (hasPaymentMonths && Number(morningstarProfile.annualPerShare) > 0) return morningstarProfile;
+    } catch (morningstarError) {
+      console.warn("Morningstar payable-date dividend lookup failed", position.symbol, morningstarError);
+    }
+  }
+
   try {
     return await fetchYahooDividendProfile(position);
   } catch (yahooError) {
@@ -2384,7 +2397,7 @@ async function fetchYahooDividendProfile(position) {
   const meta = result?.meta || {};
   const events = Object.values(result?.events?.dividends || {})
     .map((event) => ({
-      dateMs: Number(event.date) * 1000,
+      dateMs: estimateYahooDividendPaymentDate(Number(event.date) * 1000, position),
       amount: Number(event.amount)
     }))
     .filter((event) => Number.isFinite(event.dateMs) && Number.isFinite(event.amount) && event.amount > 0)
@@ -2395,7 +2408,7 @@ async function fetchYahooDividendProfile(position) {
     events,
     currency: meta.currency || (position.kind === "tw-stock" ? "TWD" : "USD"),
     price: Number(meta.regularMarketPrice),
-    source: "Yahoo Finance 股息紀錄"
+    source: position.kind === "us-stock" ? "Yahoo Finance 除息紀錄推估配發月" : "Yahoo Finance 股息紀錄"
   });
 }
 
@@ -2412,7 +2425,7 @@ async function fetchMorningstarDividendProfile(position) {
     events,
     currency: target.currency,
     price: Number(calculatePosition(position).quote?.price),
-    source: "Morningstar 股息紀錄"
+    source: "Morningstar Payable Date"
   });
   if (yieldMatch && Number.isFinite(Number(yieldMatch[1]))) profile.yieldPercent = Number(yieldMatch[1]);
   return profile;
@@ -2436,16 +2449,41 @@ function isKnownMonthlyDividend(position) {
 
 function parseMorningstarDividendEvents(markdown) {
   const rows = [];
-  const rowPattern = /\|\s*([A-Z][a-z]{2}\s+\d{2},\s+\d{4})\s*\|[^|\n]*\|[^|\n]*\|\s*([A-Z][a-z]{2}\s+\d{2},\s+\d{4})\s*\|\s*Cash Dividend\s*\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|/g;
-  let match;
-  while ((match = rowPattern.exec(markdown))) {
-    const payDate = Date.parse(match[2]);
-    const amount = Number(match[3]);
+  const seen = new Set();
+  const cleanDate = (value) => String(value || "")
+    .replace(/\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const cleanAmount = (value) => Number(String(value || "").replace(/[^0-9.]/g, ""));
+
+  for (const line of String(markdown || "").split(/\n+/)) {
+    if (!/Cash Dividend/i.test(line) || !line.includes("|")) continue;
+    const cells = line.split("|").map((cell) => cell.trim()).filter(Boolean);
+    const typeIndex = cells.findIndex((cell) => /Cash Dividend/i.test(cell));
+    if (typeIndex < 4) continue;
+
+    const payDate = Date.parse(cleanDate(cells[typeIndex - 1]));
+    const amount = cleanAmount(cells[typeIndex + 1]);
     if (Number.isFinite(payDate) && Number.isFinite(amount) && amount > 0) {
+      const key = `${payDate}:${amount}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       rows.push({ dateMs: payDate, amount });
     }
   }
   return rows.sort((a, b) => b.dateMs - a.dateMs);
+}
+
+function estimateYahooDividendPaymentDate(dateMs, position) {
+  if (position.kind !== "us-stock" || !Number.isFinite(dateMs)) return dateMs;
+  const symbol = getYahooSymbol(position.marketSymbol || position.symbol, position.kind)
+    .replace("-", ".")
+    .toUpperCase();
+  const exDate = new Date(dateMs);
+  const delayDays = MONTHLY_DIVIDEND_SYMBOLS.has(symbol) ? 5 : 15;
+  const estimated = new Date(exDate);
+  estimated.setDate(estimated.getDate() + delayDays);
+  return estimated.getTime();
 }
 
 function buildDividendProfileFromEvents({ position, events, currency, price, source }) {
@@ -2460,6 +2498,7 @@ function buildDividendProfileFromEvents({ position, events, currency, price, sou
       months: [],
       frequency: 0,
       source,
+      methodVersion: DIVIDEND_PROFILE_METHOD_VERSION,
       asOf: Date.now()
     };
   }
@@ -2502,6 +2541,7 @@ function buildDividendProfileFromEvents({ position, events, currency, price, sou
     months: Object.keys(monthAmounts).map(Number).sort((a, b) => a - b),
     frequency: inferredFrequency,
     source,
+    methodVersion: DIVIDEND_PROFILE_METHOD_VERSION,
     asOf: Date.now()
   };
 }
