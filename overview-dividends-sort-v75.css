@@ -55,13 +55,119 @@
 }
 
 @media (max-width: 780px) {
+  .dividend-payers {
+    padding: 0 10px 12px;
+  }
+
+  .dividend-payer-header {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 -4px 8px;
+    padding: 10px 4px;
+  }
+
   .dividend-payer-header .dividend-source-sort {
     grid-template-columns: auto auto;
     gap: 4px 6px;
   }
 
   .dividend-payer-header .dividend-source-sort small {
-    grid-column: 1 / -1;
+    display: none;
+  }
+
+  .dividend-payer-header .dividend-value-sort,
+  .dividend-payer-header .dividend-source-sort {
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    text-align: center;
+  }
+
+  .dividend-payer-row {
+    grid-template-columns: minmax(0, 1fr) minmax(7.5rem, auto);
+    grid-template-areas:
+      "identity annual"
+      "identity yield"
+      "identity share";
+    column-gap: 14px;
+    row-gap: 5px;
+    align-items: start;
+    padding: 14px 0;
+  }
+
+  .dividend-payer-identity {
+    grid-area: identity;
+    gap: 6px;
+    align-self: stretch;
+  }
+
+  .dividend-payer-identity strong,
+  .dividend-payer-identity small {
+    overflow: visible;
+    text-overflow: clip;
     white-space: normal;
+  }
+
+  .dividend-payer-identity strong {
+    font-size: 1.08rem;
+    line-height: 1.15;
+    word-break: keep-all;
+  }
+
+  .dividend-payer-identity small {
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  .dividend-payer-row > strong {
+    display: flex;
+    grid-area: annual;
+    justify-self: end;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 1.02rem;
+    line-height: 1.2;
+  }
+
+  .dividend-payer-row > small {
+    grid-area: yield;
+  }
+
+  .dividend-payer-share {
+    grid-area: share;
+  }
+
+  .dividend-payer-row > small,
+  .dividend-payer-share {
+    display: flex;
+    justify-self: end;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    font-size: 0.82rem;
+    line-height: 1.25;
+  }
+
+  .dividend-payer-row > strong::before,
+  .dividend-payer-row > small::before,
+  .dividend-payer-share::before {
+    color: var(--muted);
+    font-size: 0.68rem;
+    font-weight: 800;
+  }
+
+  .dividend-payer-row > strong::before {
+    content: "年領";
+  }
+
+  .dividend-payer-row > small::before {
+    content: "殖利率";
+  }
+
+  .dividend-payer-share::before {
+    content: "佔股息";
   }
 }
