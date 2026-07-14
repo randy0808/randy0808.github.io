@@ -3,6 +3,7 @@
 const STORAGE_KEY = "wealthtrack.v1";
 const FALLBACK_USD_TWD = 31.2;
 const GITHUB_API_BASE = "https://api.github.com";
+const FINANCIAL_TABLE_COLSPAN = 7;
 
 const KIND_LABELS = {
   crypto: "加密貨幣",
@@ -127,7 +128,7 @@ function renderMissingPosition() {
   dom.dividendStatus.textContent = "無資料";
   dom.fundamentalStatus.textContent = "無資料";
   dom.dividendTableBody.innerHTML = emptyRow("找不到這筆持倉");
-  dom.fundamentalTableBody.innerHTML = emptyRow("找不到這筆持倉", 6);
+  dom.fundamentalTableBody.innerHTML = emptyRow("找不到這筆持倉", FINANCIAL_TABLE_COLSPAN);
 }
 
 function renderHeader() {
@@ -234,7 +235,7 @@ async function loadDividendData() {
 async function loadFundamentals() {
   if (position.kind !== "us-stock") {
     dom.fundamentalStatus.textContent = "不適用";
-    dom.fundamentalTableBody.innerHTML = emptyRow("這類資產沒有 EPS、ROE、FCF 等公司財報欄位", 6);
+    dom.fundamentalTableBody.innerHTML = emptyRow("這類資產沒有 EPS、ROE、FCF 等公司財報欄位", FINANCIAL_TABLE_COLSPAN);
     return;
   }
   dom.fundamentalStatus.textContent = "讀取中";
@@ -261,7 +262,7 @@ async function loadFundamentals() {
     dom.fundamentalStatus.textContent = rows.length ? source : "資料不足";
   } catch (error) {
     dom.fundamentalStatus.textContent = "讀取失敗";
-    dom.fundamentalTableBody.innerHTML = emptyRow("財報資料暫時無法取得", 6);
+    dom.fundamentalTableBody.innerHTML = emptyRow("財報資料暫時無法取得", FINANCIAL_TABLE_COLSPAN);
   }
 }
 
@@ -987,19 +988,64 @@ function renderCachedDividendProfile(profile) {
 
 function renderFundamentalTable(rows) {
   if (!rows.length) {
-    dom.fundamentalTableBody.innerHTML = emptyRow("沒有足夠的 SEC 年度資料", 6);
+    dom.fundamentalTableBody.innerHTML = emptyRow("沒有足夠的 SEC 年度資料", FINANCIAL_TABLE_COLSPAN);
     return;
   }
-  dom.fundamentalTableBody.innerHTML = rows.map((row) => `
+  const displayRows = addEpsGrowth(rows);
+  const averageRow = buildFiveYearAverageRow(displayRows);
+  const averageMarkup = averageRow ? `
+    <tr class="financial-average-row">
+      <td>5 Year Average</td>
+      <td>${formatNumber(averageRow.eps, 2)}</td>
+      <td>${formatPlainPercent(averageRow.epsGrowth)}</td>
+      <td>--</td>
+      <td>--</td>
+      <td>--</td>
+      <td>--</td>
+    </tr>
+  ` : "";
+  dom.fundamentalTableBody.innerHTML = averageMarkup + displayRows.map((row) => `
     <tr>
       <td>${row.year}</td>
       <td>${formatNumber(row.eps, 2)}</td>
+      <td>${formatPlainPercent(row.epsGrowth)}</td>
       <td>${formatPlainPercent(row.roe)}</td>
       <td>${formatCompactCurrency(row.fcf, "USD")}</td>
       <td>${formatPlainPercent(row.netMargin)}</td>
       <td>${formatRatio(row.interestCoverage)}</td>
     </tr>
   `).join("");
+}
+
+function addEpsGrowth(rows) {
+  const epsByYear = new Map(rows
+    .map((row) => [Number(row.year), Number(row.eps)])
+    .filter(([year, eps]) => Number.isFinite(year) && Number.isFinite(eps)));
+  return rows.map((row) => {
+    const year = Number(row.year);
+    const eps = Number(row.eps);
+    const previousEps = epsByYear.get(year - 1);
+    const epsGrowth = Number.isFinite(eps) && Number.isFinite(previousEps) && previousEps !== 0
+      ? ((eps - previousEps) / Math.abs(previousEps)) * 100
+      : NaN;
+    return { ...row, epsGrowth };
+  });
+}
+
+function buildFiveYearAverageRow(rows) {
+  const latestFiveRows = rows.filter((row) => Number.isFinite(Number(row.eps))).slice(0, 5);
+  if (!latestFiveRows.length) return null;
+  const epsValues = latestFiveRows.map((row) => Number(row.eps)).filter(Number.isFinite);
+  const epsGrowthValues = latestFiveRows.map((row) => Number(row.epsGrowth)).filter(Number.isFinite);
+  return {
+    eps: average(epsValues),
+    epsGrowth: average(epsGrowthValues)
+  };
+}
+
+function average(values) {
+  if (!values.length) return NaN;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function updatePriceHover(clientX) {
