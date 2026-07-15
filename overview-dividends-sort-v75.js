@@ -1,5 +1,5 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v75";
+  const PATCH_KEY = "wealthtrack.dividendSort.v84";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
 
@@ -12,20 +12,24 @@
     yieldPercent: "desc",
     dividendShare: "desc"
   };
+  const DIVIDEND_SCROLL_IDLE_MS = 1400;
   let dividendPayerScrollTopV75 = 0;
   let dividendPayerIsRestoringV75 = false;
+  let dividendPayerUserScrollUntilV75 = 0;
+  let pendingDividendRenderTimerV75 = 0;
+  let patchedNativeEntryQuickStatsV75 = false;
 
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=78")) {
-        existing.href = "overview-dividends-sort-v75.css?v=78";
+      if (!String(existing.getAttribute("href") || "").includes("v=84")) {
+        existing.href = "overview-dividends-sort-v75.css?v=84";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=78";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=84";
     document.head.appendChild(stylesheet);
   }
 
@@ -48,7 +52,13 @@
     scroller.addEventListener("scroll", () => {
       if (dividendPayerIsRestoringV75) return;
       dividendPayerScrollTopV75 = scroller.scrollTop;
+      dividendPayerUserScrollUntilV75 = Date.now() + DIVIDEND_SCROLL_IDLE_MS;
     }, { passive: true });
+    ["wheel", "touchmove", "pointerdown"].forEach((eventName) => {
+      scroller.addEventListener(eventName, () => {
+        dividendPayerUserScrollUntilV75 = Date.now() + DIVIDEND_SCROLL_IDLE_MS;
+      }, { passive: true });
+    });
   }
 
   function restoreDividendPayerScrollV75(scrollTop = dividendPayerScrollTopV75) {
@@ -67,6 +77,19 @@
 
   function restoreDividendPayerScrollSoonV75(scrollTop = dividendPayerScrollTopV75) {
     requestAnimationFrame(() => restoreDividendPayerScrollV75(scrollTop));
+  }
+
+  function dividendPayerIsUserScrollingV75() {
+    const scroller = getDividendPayersScrollerV75();
+    return Boolean(scroller && Date.now() < dividendPayerUserScrollUntilV75);
+  }
+
+  function scheduleDeferredDividendRenderV75(scrollTop = dividendPayerScrollTopV75) {
+    clearTimeout(pendingDividendRenderTimerV75);
+    pendingDividendRenderTimerV75 = setTimeout(() => {
+      pendingDividendRenderTimerV75 = 0;
+      renderEntryQuickStatsV75(scrollTop, { force: true });
+    }, DIVIDEND_SCROLL_IDLE_MS + 120);
   }
 
   function readDividendSortModeV75() {
@@ -100,7 +123,7 @@
     const defaultDirection = DIVIDEND_SORT_DEFAULTS[field] || "desc";
     const direction = current.field === field ? (current.direction === "asc" ? "desc" : "asc") : defaultDirection;
     writeDividendSortModeV75(`${field}-${direction}`);
-    renderEntryQuickStatsV75(0);
+    renderEntryQuickStatsV75(0, { force: true });
   }
 
   function updateDividendSortButtonsV75(target) {
@@ -243,13 +266,19 @@
     return months.map((monthIndex) => MONTH_LABELS[monthIndex]).join("、");
   }
 
-  function renderEntryQuickStatsV75(scrollTopBeforeRender = getCurrentDividendScrollTopV75()) {
+  function renderEntryQuickStatsV75(scrollTopBeforeRender = getCurrentDividendScrollTopV75(), options = {}) {
     ensureDividendSortStyles();
     const target = document.getElementById("entryQuickStats");
     if (!target) return;
 
     const dividendRows = getDividendRows();
     if (!dividendRows.length) return;
+
+    if (!options.force && dividendPayerIsUserScrollingV75()) {
+      scheduleDeferredDividendRenderV75(scrollTopBeforeRender);
+      restoreDividendPayerScrollSoonV75(scrollTopBeforeRender);
+      return;
+    }
 
     const summary = calculateDividendSummaryV75(dividendRows);
     const maxMonth = Math.max(...summary.monthTotals, 0);
@@ -337,12 +366,29 @@
   }
 
   try {
+    if (typeof renderEntryQuickStats === "function" && !renderEntryQuickStats.__dividendSortV75) {
+      renderEntryQuickStats = function renderEntryQuickStatsWithDividendSortV75() {
+        renderEntryQuickStatsV75(getCurrentDividendScrollTopV75());
+      };
+      renderEntryQuickStats.__dividendSortV75 = true;
+      patchedNativeEntryQuickStatsV75 = true;
+    }
+  } catch (error) {
+    console.warn("Dividend entry stats hook failed", error);
+  }
+
+  try {
     const previousRender = render;
     if (!previousRender.__dividendSortV75) {
       render = function renderWithDividendSortV75() {
         const scrollTopBeforeRender = getCurrentDividendScrollTopV75();
         previousRender();
-        renderEntryQuickStatsV75(scrollTopBeforeRender);
+        if (patchedNativeEntryQuickStatsV75) {
+          bindDividendPayerScrollMemoryV75();
+          restoreDividendPayerScrollSoonV75(scrollTopBeforeRender);
+        } else {
+          renderEntryQuickStatsV75(scrollTopBeforeRender);
+        }
       };
       render.__dividendSortV75 = true;
     }
