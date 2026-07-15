@@ -1,5 +1,5 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v85";
+  const PATCH_KEY = "wealthtrack.dividendSort.v86";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
 
@@ -22,14 +22,14 @@
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=85")) {
-        existing.href = "overview-dividends-sort-v75.css?v=85";
+      if (!String(existing.getAttribute("href") || "").includes("v=86")) {
+        existing.href = "overview-dividends-sort-v75.css?v=86";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=85";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=86";
     document.head.appendChild(stylesheet);
   }
 
@@ -142,6 +142,59 @@
       button.addEventListener("click", () => setDividendSortFieldV75(button.dataset.dividendSortField));
     });
     updateDividendSortButtonsV75(target);
+  }
+
+  function clearPinnedMonthTooltipsV75(root = document) {
+    root.querySelectorAll(".dividend-month-card.is-pinned").forEach((card) => {
+      card.classList.remove("is-pinned");
+      card.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function bindDividendMonthTooltipsV75(target) {
+    if (!document.__wealthtrackDividendMonthDismissV75) {
+      document.__wealthtrackDividendMonthDismissV75 = true;
+      document.addEventListener("click", (event) => {
+        if (event.target.closest("#entryQuickStats .dividend-month-card")) return;
+        clearPinnedMonthTooltipsV75();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") clearPinnedMonthTooltipsV75();
+      });
+    }
+
+    target.querySelectorAll(".dividend-month-card").forEach((card) => {
+      if (card.__wealthtrackDividendMonthTooltipV75) return;
+      card.__wealthtrackDividendMonthTooltipV75 = true;
+      card.setAttribute("aria-expanded", "false");
+      card.querySelector(".dividend-month-tooltip")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      card.addEventListener("click", (event) => {
+        if (event.target.closest(".dividend-month-tooltip")) return;
+        event.stopPropagation();
+        const shouldPin = !card.classList.contains("is-pinned");
+        clearPinnedMonthTooltipsV75(target);
+        if (shouldPin) {
+          card.classList.add("is-pinned");
+          card.setAttribute("aria-expanded", "true");
+          try {
+            card.focus({ preventScroll: true });
+          } catch (error) {
+            card.focus();
+          }
+        }
+      });
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          clearPinnedMonthTooltipsV75(target);
+          return;
+        }
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        card.click();
+      });
+    });
   }
 
   function normalizeSymbolForDividendV75(position) {
@@ -291,6 +344,7 @@
           <span>${MONTH_LABELS[monthIndex]}配息</span>
           <strong class="${sensitiveClass(totalValue)}">${totalValue > 0 ? formatWholeSensitiveCurrency(totalValue) : "--"}</strong>
         </div>
+        <small class="dividend-month-tooltip-hint">點月份固定，再點一次收起</small>
         ${rows ? `<div class="dividend-month-tooltip-list">${rows}</div>` : `<small>這個月暫無配息標的</small>`}
       </div>
     `;
@@ -322,7 +376,7 @@
         const ratio = maxMonth > 0 ? (value / maxMonth) * 100 : 0;
         const payers = summary.monthPayers?.[index] || [];
         return `
-          <div class="dividend-month-card ${value > 0 ? "has-dividend" : ""}" tabindex="0" aria-label="${MONTH_LABELS[index]}配息 ${value > 0 ? formatWholeSensitiveCurrency(value) : "無"}">
+          <div class="dividend-month-card ${value > 0 ? "has-dividend" : ""}" tabindex="0" role="button" aria-label="${MONTH_LABELS[index]}配息 ${value > 0 ? formatWholeSensitiveCurrency(value) : "無"}">
             <span>${MONTH_LABELS[index]}</span>
             <strong class="${sensitiveClass(value)}">${value > 0 ? formatWholeSensitiveCurrency(value) : "--"}</strong>
             <span class="dividend-month-bar"><span style="width:${ratio.toFixed(1)}%"></span></span>
@@ -393,6 +447,7 @@
     `;
 
     bindDividendSortButtonsV75(target);
+    bindDividendMonthTooltipsV75(target);
     bindDividendPayerScrollMemoryV75();
     restoreDividendPayerScrollSoonV75(scrollTopBeforeRender);
   }
