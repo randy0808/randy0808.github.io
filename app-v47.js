@@ -13,6 +13,7 @@ const DIVIDEND_FETCH_DELAY_MS = 350;
 const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
+const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-alert-v96";
 const FUNDAMENTAL_FETCH_DELAY_MS = 350;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
 const ASSET_STOCK_PB_THRESHOLD = 0.8;
@@ -33,6 +34,8 @@ const SYNC_FILE_NAME = "wealthtrack-sync.json";
 const SYNC_GIST_DESCRIPTION = "WealthTrack private sync";
 const DEVICE_SYNC_HASH_PREFIX = "#sync=";
 const YIELD_ALERT_THRESHOLD = 4;
+const GROWTH_PE_THRESHOLD = 12;
+const GROWTH_ALERT_PERIODS = [3, 5, 10];
 const YIELD_ALERT_STORAGE_KEY = "wealthtrack.yieldAlerts.v1";
 
 const SEC_STATIC_CIKS = {
@@ -892,12 +895,16 @@ function getYieldAlertRows() {
     .sort((a, b) => b.metrics.currentDividendYield - a.metrics.currentDividendYield);
 }
 
-function isAssetStockAlertCandidate(position) {
+function isFundamentalAlertCandidate(position) {
   return Boolean(
     position
-    && (position.kind === "us-stock" || position.kind === "tw-stock")
+    && position.kind === "us-stock"
     && !isEtfLikePosition(position)
   );
+}
+
+function isAssetStockAlertCandidate(position) {
+  return isFundamentalAlertCandidate(position);
 }
 
 function getAssetStockAlertRows() {
@@ -928,6 +935,59 @@ function getAssetStockAlertRows() {
       && priceToBook <= ASSET_STOCK_PB_THRESHOLD
     )
     .sort((a, b) => a.priceToBook - b.priceToBook);
+}
+
+function isGrowthStockAlertCandidate(position) {
+  return isFundamentalAlertCandidate(position);
+}
+
+function getGrowthStockAlertRows() {
+  return state.positions
+    .filter(isGrowthStockAlertCandidate)
+    .map((position) => {
+      const metrics = calculatePosition(position);
+      const profile = state.fundamentals.profiles[fundamentalKey(position)];
+      const quotePrice = Number(metrics.quote?.price);
+      const quoteCurrency = metrics.quoteCurrency || "USD";
+      const epsCurrency = profile?.currency || quoteCurrency;
+      const latestEps = convertCurrency(firstFiniteNumber(profile?.ttmEps, profile?.latestEps), epsCurrency, quoteCurrency);
+      const peRatio = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(latestEps) && latestEps > 0
+        ? quotePrice / latestEps
+        : NaN;
+      const conservativeEpsGrowth = Number(profile?.conservativeEpsGrowth);
+      const fairPrice = Number.isFinite(latestEps) && latestEps > 0 && Number.isFinite(conservativeEpsGrowth) && conservativeEpsGrowth > 0
+        ? latestEps * conservativeEpsGrowth
+        : NaN;
+      const meetsCheapPe = Number.isFinite(peRatio) && peRatio <= GROWTH_PE_THRESHOLD;
+      const meetsGrowthValue = Number.isFinite(peRatio)
+        && Number.isFinite(conservativeEpsGrowth)
+        && peRatio < conservativeEpsGrowth
+        && Number.isFinite(fairPrice)
+        && Number.isFinite(quotePrice)
+        && quotePrice < fairPrice;
+      return {
+        position,
+        metrics,
+        profile,
+        quotePrice,
+        quoteCurrency,
+        latestEps,
+        peRatio,
+        conservativeEpsGrowth,
+        fairPrice,
+        meetsCheapPe,
+        meetsGrowthValue
+      };
+    })
+    .filter(({ profile, meetsCheapPe, meetsGrowthValue }) =>
+      profile
+      && !profile.error
+      && (meetsCheapPe || meetsGrowthValue)
+    )
+    .sort((a, b) => {
+      if (a.meetsCheapPe !== b.meetsCheapPe) return a.meetsCheapPe ? -1 : 1;
+      return firstFiniteNumber(a.peRatio, 999) - firstFiniteNumber(b.peRatio, 999);
+    });
 }
 
 function calculatePortfolio() {
@@ -1368,6 +1428,77 @@ function renderYieldAlerts() {
         <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在搜尋符合條件的資產股" : "目前沒有符合條件"}</span>`}</div>
+    </div>
+  `;
+  panel.classList.remove("is-hidden");
+  if (alerts.length) maybeNotifyYieldAlerts(alerts);
+}
+
+function renderYieldAlerts() {
+  const panel = ensureYieldAlertPanel();
+  if (!panel) return;
+
+  const alerts = getYieldAlertRows();
+  const growthAlerts = getGrowthStockAlertRows();
+  const assetStockAlerts = getAssetStockAlertRows();
+  const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+  const alertItems = alerts.map(({ position, metrics }) => `
+    <span class="yield-alert-chip">
+      <strong>${escapeHtml(position.symbol)}</strong>
+      <span>${formatPlainPercent(metrics.currentDividendYield, 2)}</span>
+    </span>
+  `).join("");
+  const growthItems = growthAlerts.map((row) => {
+    const growthText = Number.isFinite(row.conservativeEpsGrowth)
+      ? `<span>成長 ${formatPlainPercent(row.conservativeEpsGrowth, 1)}</span>`
+      : "";
+    const reasonText = row.meetsCheapPe ? "PE便宜" : "低於合理價";
+    return `
+      <span class="yield-alert-chip">
+        <strong>${escapeHtml(row.position.symbol)}</strong>
+        <span>PE ${formatNumber(row.peRatio, 1)}</span>
+        ${growthText}
+        <span>${reasonText}</span>
+      </span>
+    `;
+  }).join("");
+  const assetStockItems = assetStockAlerts.map(({ position, priceToBook }) => `
+    <span class="yield-alert-chip">
+      <strong>${escapeHtml(position.symbol)}</strong>
+      <span>P/B ${formatNumber(priceToBook, 2)}</span>
+    </span>
+  `).join("");
+  const fundamentalStatus = state.fundamentals.isRefreshing
+    ? "正在更新財務資料"
+    : state.fundamentals.lastSync
+      ? `更新 ${formatTime(state.fundamentals.lastSync)}`
+      : "尚未更新";
+  const action = permission === "default"
+    ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
+    : `<span class="yield-alert-state">${permission === "granted" ? "通知已開啟" : permission === "denied" ? "通知被瀏覽器封鎖" : "此瀏覽器不支援通知"}</span>`;
+
+  panel.innerHTML = `
+    <div class="stock-alert-card stock-alert-card-wide">
+      <div class="stock-alert-main">
+        <strong>股息股提醒</strong>
+        <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
+      </div>
+      <div class="yield-alert-list">${alertItems || `<span class="stock-alert-empty">目前沒有符合條件</span>`}</div>
+      <div class="yield-alert-actions">${action}</div>
+    </div>
+    <div class="stock-alert-card">
+      <div class="stock-alert-main">
+        <strong>成長股提醒</strong>
+        <span>PE <= ${GROWTH_PE_THRESHOLD}，或股價低於保守 EPS 成長合理價</span>
+      </div>
+      <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在更新財務資料" : "目前沒有符合條件"}</span>`}</div>
+    </div>
+    <div class="stock-alert-card">
+      <div class="stock-alert-main">
+        <strong>資產股提醒</strong>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，${fundamentalStatus}</span>
+      </div>
+      <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在檢查每股帳面價值" : "目前沒有符合條件"}</span>`}</div>
     </div>
   `;
   panel.classList.remove("is-hidden");
@@ -2627,6 +2758,7 @@ function fundamentalKey(position) {
 
 function fundamentalProfileIsFresh(profile) {
   if (!profile || profile.error) return false;
+  if (profile.methodVersion !== FUNDAMENTAL_PROFILE_METHOD_VERSION) return false;
   return profile?.asOf && Date.now() - Number(profile.asOf) < FUNDAMENTAL_CACHE_MS;
 }
 
@@ -2723,14 +2855,265 @@ async function fetchSecBookValueProfile(position) {
   if (!Number.isFinite(equity) || equity <= 0) throw new Error("Missing stockholders equity");
   if (!Number.isFinite(shares) || shares <= 0) throw new Error("Missing shares outstanding");
 
+  const secEpsRows = buildSecAnnualEpsRows(gaap);
+  const yahooEpsProfile = await fetchYahooEpsProfile(position).catch(() => ({ epsRows: [], ttmEps: NaN }));
+  const epsProfile = buildEpsGrowthProfile(
+    mergeEpsRows(secEpsRows, yahooEpsProfile.epsRows),
+    yahooEpsProfile.ttmEps
+  );
+
   return {
     symbol: position.symbol,
     currency: "USD",
+    methodVersion: FUNDAMENTAL_PROFILE_METHOD_VERSION,
     bookValuePerShare: equity / shares,
     priceToBook: null,
+    epsRows: epsProfile.epsRows,
+    ttmEps: epsProfile.ttmEps,
+    latestEps: epsProfile.latestEps,
+    epsGrowthAverages: epsProfile.epsGrowthAverages,
+    conservativeEpsGrowth: epsProfile.conservativeEpsGrowth,
     source: "SEC companyfacts",
     asOf: Date.now()
   };
+}
+
+function buildSecAnnualEpsRows(gaap) {
+  let eps = annualFundamentalConcept(gaap, [
+    "EarningsPerShareDiluted",
+    "EarningsPerShareBasic",
+    "EarningsPerShareBasicAndDiluted",
+    "IncomeLossFromContinuingOperationsPerDilutedShare",
+    "IncomeLossFromContinuingOperationsPerBasicShare"
+  ], (unit) => unit.toLowerCase().includes("shares"));
+  const netIncome = annualFundamentalConcept(gaap, [
+    "NetIncomeLoss",
+    "ProfitLoss",
+    "NetIncomeLossAvailableToCommonStockholdersBasic",
+    "NetIncomeLossAttributableToParent",
+    "IncomeLossFromContinuingOperations"
+  ], (unit) => unit === "USD");
+  const dilutedShares = annualFundamentalConcept(gaap, [
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "WeightedAverageNumberOfShareDiluted",
+    "WeightedAverageDilutedSharesOutstanding",
+    "WeightedAverageNumberDilutedSharesOutstanding",
+    "WeightedAverageNumberOfSharesOutstandingDiluted",
+    "WeightedAverageNumberOfSharesOutstandingBasic"
+  ], (unit) => unit.toLowerCase().includes("shares"));
+  eps = mergeFundamentalValueMaps(eps, computeEpsFromIncome(netIncome, dilutedShares));
+  return epsMapToRows(eps);
+}
+
+async function fetchYahooEpsProfile(position) {
+  const symbol = getYahooSymbol(position.marketSymbol || position.symbol, position.kind);
+  const end = Math.floor(Date.now() / 1000) + 86400;
+  const start = Math.floor(Date.UTC(new Date().getFullYear() - 11, 0, 1) / 1000);
+  const types = [
+    "trailingDilutedEPS",
+    "trailingBasicEPS",
+    "annualDilutedEPS",
+    "annualBasicEPS"
+  ];
+  let lastError = null;
+  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
+    try {
+      const url = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?symbol=${encodeURIComponent(symbol)}&type=${types.join(",")}&period1=${start}&period2=${end}`;
+      const data = await fetchJson(url, { fallbackProxy: true, timeoutMs: 14_000 });
+      const profile = parseYahooEpsProfile(data);
+      if (profile.epsRows.length || Number.isFinite(profile.ttmEps)) return profile;
+      lastError = new Error("Yahoo EPS returned no rows");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Yahoo EPS unavailable");
+}
+
+function parseYahooEpsProfile(data) {
+  const annual = new Map();
+  const trailing = {};
+  (data?.timeseries?.result || []).forEach((entry) => {
+    const type = entry?.meta?.type?.[0];
+    if (!type || !Array.isArray(entry[type])) return;
+    entry[type].forEach((point) => {
+      const value = Number(point?.reportedValue?.raw);
+      if (!Number.isFinite(value)) return;
+      if (type === "trailingDilutedEPS" || type === "trailingBasicEPS") {
+        storeLatestEpsPoint(trailing, type, point);
+        return;
+      }
+      const year = Number(String(point.asOfDate || "").slice(0, 4));
+      if (!isReasonableFundamentalYear(year)) return;
+      if (type === "annualDilutedEPS" || !annual.has(year)) annual.set(year, value);
+    });
+  });
+  return {
+    epsRows: epsMapToRows(annual),
+    ttmEps: firstFiniteNumber(
+      latestStoredEpsValue(trailing, "trailingDilutedEPS"),
+      latestStoredEpsValue(trailing, "trailingBasicEPS")
+    )
+  };
+}
+
+function storeLatestEpsPoint(target, key, point) {
+  const value = Number(point?.reportedValue?.raw);
+  if (!Number.isFinite(value)) return;
+  const asOfTime = Date.parse(`${point.asOfDate || ""}T00:00:00Z`);
+  const timestamp = Number(point.timestamp) * 1000;
+  const time = Number.isFinite(asOfTime) ? asOfTime : timestamp;
+  const existing = target[key];
+  if (!existing || Number(time || 0) >= Number(existing.time || 0)) {
+    target[key] = { value, time };
+  }
+}
+
+function latestStoredEpsValue(target, key) {
+  return target?.[key] ? Number(target[key].value) : NaN;
+}
+
+function annualFundamentalConcept(namespace, conceptNames, unitMatches) {
+  const byYear = new Map();
+  conceptNames.forEach((conceptName, conceptIndex) => {
+    const units = namespace?.[conceptName]?.units;
+    if (!units) return;
+    Object.entries(units).forEach(([unit, facts]) => {
+      if (!unitMatches(unit) || !Array.isArray(facts)) return;
+      facts.forEach((fact) => {
+        const year = annualFundamentalFactYear(fact);
+        if (!isReasonableFundamentalYear(year)) return;
+        if (fact.fp && fact.fp !== "FY") return;
+        if (!/^(10-K|20-F|40-F)/i.test(String(fact.form || ""))) return;
+        const value = Number(fact.val);
+        if (!Number.isFinite(value)) return;
+        const candidate = {
+          value,
+          conceptIndex,
+          filed: String(fact.filed || ""),
+          hasAnnualFrame: /^CY\d{4}$/.test(String(fact.frame || "")),
+          durationDays: fundamentalFactDurationDays(fact)
+        };
+        const existing = byYear.get(year);
+        if (!existing || shouldUseAnnualFundamentalFact(candidate, existing)) byYear.set(year, candidate);
+      });
+    });
+  });
+  return new Map([...byYear.entries()].map(([year, fact]) => [year, fact.value]));
+}
+
+function annualFundamentalFactYear(fact) {
+  const frame = String(fact.frame || "");
+  const annualFrame = frame.match(/^CY(\d{4})$/);
+  if (annualFrame) {
+    const frameYear = Number(annualFrame[1]);
+    return isReasonableFundamentalYear(frameYear) ? frameYear : NaN;
+  }
+  const durationDays = fundamentalFactDurationDays(fact);
+  if (/^CY\d{4}Q\d/i.test(frame) && durationDays > 0) return NaN;
+  if (durationDays && durationDays < 300) return NaN;
+  const endYear = Number(String(fact.end || "").slice(0, 4));
+  if (isReasonableFundamentalYear(endYear)) return endYear;
+  const fiscalYear = Number(fact.fy);
+  return isReasonableFundamentalYear(fiscalYear) ? fiscalYear : NaN;
+}
+
+function fundamentalFactDurationDays(fact) {
+  if (!fact.start || !fact.end) return 0;
+  const start = new Date(`${fact.start}T00:00:00Z`).getTime();
+  const end = new Date(`${fact.end}T00:00:00Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+function shouldUseAnnualFundamentalFact(candidate, existing) {
+  if (candidate.conceptIndex !== existing.conceptIndex) return candidate.conceptIndex < existing.conceptIndex;
+  if (candidate.filed !== existing.filed) return candidate.filed > existing.filed;
+  if (candidate.hasAnnualFrame !== existing.hasAnnualFrame) return candidate.hasAnnualFrame;
+  return candidate.durationDays > existing.durationDays;
+}
+
+function isReasonableFundamentalYear(year) {
+  const currentYear = new Date().getFullYear();
+  return Number.isFinite(year) && year >= currentYear - 15 && year <= currentYear + 1;
+}
+
+function computeEpsFromIncome(netIncome, shares) {
+  const result = new Map();
+  netIncome.forEach((income, year) => {
+    const shareCount = Number(shares.get(year));
+    if (Number.isFinite(income) && Number.isFinite(shareCount) && shareCount > 0) {
+      result.set(year, income / shareCount);
+    }
+  });
+  return result;
+}
+
+function mergeFundamentalValueMaps(primary, secondary) {
+  const result = new Map(secondary);
+  primary.forEach((value, year) => {
+    if (Number.isFinite(Number(value))) result.set(year, value);
+  });
+  return result;
+}
+
+function epsMapToRows(epsMap) {
+  return [...epsMap.entries()]
+    .map(([year, eps]) => ({ year: Number(year), eps: Number(eps) }))
+    .filter((row) => isReasonableFundamentalYear(row.year) && Number.isFinite(row.eps))
+    .sort((a, b) => b.year - a.year);
+}
+
+function mergeEpsRows(primaryRows, secondaryRows) {
+  const byYear = new Map();
+  (secondaryRows || []).forEach((row) => {
+    if (isReasonableFundamentalYear(Number(row.year)) && Number.isFinite(Number(row.eps))) {
+      byYear.set(Number(row.year), Number(row.eps));
+    }
+  });
+  (primaryRows || []).forEach((row) => {
+    if (isReasonableFundamentalYear(Number(row.year)) && Number.isFinite(Number(row.eps))) {
+      byYear.set(Number(row.year), Number(row.eps));
+    }
+  });
+  return epsMapToRows(byYear).slice(0, 11);
+}
+
+function buildEpsGrowthProfile(epsRows, ttmEps = NaN) {
+  const cleanRows = (epsRows || [])
+    .filter((row) => isReasonableFundamentalYear(Number(row.year)) && Number.isFinite(Number(row.eps)))
+    .sort((a, b) => Number(b.year) - Number(a.year));
+  const epsByYear = new Map(cleanRows.map((row) => [Number(row.year), Number(row.eps)]));
+  const rowsWithGrowth = cleanRows.map((row) => {
+    const year = Number(row.year);
+    const eps = Number(row.eps);
+    const previousEps = epsByYear.get(year - 1);
+    const epsGrowth = Number.isFinite(eps) && Number.isFinite(previousEps) && previousEps !== 0
+      ? ((eps - previousEps) / Math.abs(previousEps)) * 100
+      : NaN;
+    return { year, eps, epsGrowth };
+  });
+  const growthValues = rowsWithGrowth.map((row) => Number(row.epsGrowth)).filter(Number.isFinite);
+  const epsGrowthAverages = Object.fromEntries(GROWTH_ALERT_PERIODS.map((period) => {
+    const values = growthValues.slice(0, period);
+    return [period, averageFinite(values)];
+  }));
+  const conservativeGrowthValues = Object.values(epsGrowthAverages).filter(Number.isFinite);
+  const ttm = Number(ttmEps);
+  const latestAnnualEps = rowsWithGrowth.find((row) => Number.isFinite(row.eps))?.eps;
+  return {
+    epsRows: rowsWithGrowth.slice(0, 10),
+    ttmEps: Number.isFinite(ttm) ? ttm : NaN,
+    latestEps: firstFiniteNumber(ttm, latestAnnualEps),
+    epsGrowthAverages,
+    conservativeEpsGrowth: conservativeGrowthValues.length ? Math.min(...conservativeGrowthValues) : NaN
+  };
+}
+
+function averageFinite(values) {
+  const finite = values.filter(Number.isFinite);
+  if (!finite.length) return NaN;
+  return finite.reduce((sum, value) => sum + value, 0) / finite.length;
 }
 
 function latestFactValue(namespace, conceptNames, unitMatches) {
