@@ -1,14 +1,49 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v87";
+  const PATCH_KEY = "wealthtrack.dividendSort.v88";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
 
-  const MONTHLY_SYMBOLS_V75 = new Set(["O", "SGOV"]);
+  const MONTHLY_SYMBOLS_V75 = new Set(["O", "SGOV", "ANGL"]);
   const KNOWN_DIVIDEND_SCHEDULES_V75 = {
     "0056.TW": [0, 3, 6, 9],
     "00878.TW": [1, 4, 7, 10],
     "00713.TW": [2, 5, 8, 11],
-    "0050.TW": [0, 6]
+    "0050.TW": [0, 6],
+    AAPL: [1, 4, 7, 10],
+    ASML: [4, 10],
+    AWR: [2, 5, 8, 11],
+    BAC: [2, 5, 8, 11],
+    BEN: [0, 3, 6, 9],
+    CCL: [1, 4, 7, 10],
+    COST: [1, 4, 7, 10],
+    DIS: [0, 6],
+    EL: [2, 5, 8, 11],
+    GIS: [1, 4, 7, 10],
+    GOOGL: [2, 5, 8, 11],
+    HRL: [1, 4, 7, 10],
+    JPM: [0, 3, 6, 9],
+    JNJ: [2, 5, 8, 11],
+    KHC: [2, 5, 8, 11],
+    KO: [3, 6, 9, 11],
+    MA: [1, 4, 7, 10],
+    MCD: [2, 5, 8, 11],
+    META: [2, 5, 8, 11],
+    MMM: [2, 5, 8, 11],
+    MSFT: [2, 5, 8, 11],
+    NVDA: [2, 5, 8, 11],
+    PEP: [0, 2, 5, 8],
+    PG: [1, 4, 7, 10],
+    SBUX: [1, 4, 7, 10],
+    T: [1, 4, 7, 10],
+    TSM: [0, 3, 6, 9],
+    V: [2, 5, 8, 11],
+    VOO: [2, 5, 8, 11],
+    VXUS: [2, 5, 8, 11],
+    WFC: [2, 5, 8, 11],
+    WMT: [0, 3, 5, 8],
+    WTRG: [2, 5, 8, 11],
+    XOM: [2, 5, 8, 11],
+    YORW: [0, 3, 6, 9]
   };
   const QUARTERLY_DIVIDEND_SCHEDULES_V75 = [
     [0, 3, 6, 9],
@@ -33,14 +68,14 @@
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=87")) {
-        existing.href = "overview-dividends-sort-v75.css?v=87";
+      if (!String(existing.getAttribute("href") || "").includes("v=88")) {
+        existing.href = "overview-dividends-sort-v75.css?v=88";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=87";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=88";
     document.head.appendChild(stylesheet);
   }
 
@@ -248,6 +283,16 @@
     return KNOWN_DIVIDEND_SCHEDULES_V75[symbol] || null;
   }
 
+  function hasDividendEvidenceV75(monthAmounts, profile) {
+    const annualPerShare = Number(profile?.annualPerShare);
+    const lastDividendPerShare = Number(profile?.lastDividendPerShare);
+    const yieldPercent = Number(profile?.yieldPercent);
+    return Object.keys(monthAmounts || {}).length > 0
+      || (Number.isFinite(annualPerShare) && annualPerShare > 0)
+      || (Number.isFinite(lastDividendPerShare) && lastDividendPerShare > 0)
+      || (Number.isFinite(yieldPercent) && yieldPercent > 0);
+  }
+
   function inferQuarterlyDividendScheduleV75(monthAmounts, profile) {
     const monthKeys = Object.keys(monthAmounts)
       .map(Number)
@@ -279,6 +324,7 @@
 
     if (Number.isFinite(frequency) && frequency >= 4 && bestScore >= 1) return bestSchedule;
     if (observedMonths.length >= 2 && bestScore >= 2) return bestSchedule;
+    if (observedMonths.length === 1 && bestScore >= 1 && hasDividendEvidenceV75(monthAmounts, profile)) return bestSchedule;
     return null;
   }
 
