@@ -294,6 +294,9 @@ function normalizeColumnOrder(order) {
   const incoming = Array.isArray(order) ? order : [];
   const known = new Set(DATA_COLUMNS.map((column) => column.id));
   const filtered = incoming.filter((id, index) => known.has(id) && incoming.indexOf(id) === index);
+  if (filtered.includes("profit") && !filtered.includes("profitPercent")) {
+    filtered.splice(filtered.indexOf("profit") + 1, 0, "profitPercent");
+  }
   const missing = DEFAULT_COLUMN_ORDER.filter((id) => !filtered.includes(id));
   return [...filtered, ...missing];
 }
