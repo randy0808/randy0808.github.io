@@ -1531,34 +1531,53 @@ select:focus {
   width: min(260px, 100%);
 }
 
-.yield-alert-panel {
+.stock-alert-panel {
   display: grid;
-  grid-template-columns: minmax(160px, 0.9fr) minmax(220px, 1.6fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 10px;
+}
+
+.stock-alert-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-soft) 88%, var(--primary) 8%);
+}
+
+.stock-alert-card-wide {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(260px, 1.8fr) auto;
   align-items: center;
   gap: 12px;
-  margin: 12px 0 10px;
-  padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--primary) 48%, var(--line));
-  border-radius: 8px;
   background: color-mix(in srgb, var(--panel-soft) 88%, var(--primary) 12%);
 }
 
-.yield-alert-main {
+.stock-alert-main {
   display: grid;
   gap: 2px;
 }
 
-.yield-alert-main strong,
+.stock-alert-main strong,
 .yield-alert-chip strong {
   color: var(--text);
   font-weight: 850;
 }
 
-.yield-alert-main span,
+.stock-alert-main span,
 .yield-alert-state,
-.yield-alert-more {
+.stock-alert-empty {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.stock-alert-empty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
 }
 
 .yield-alert-list {
@@ -1886,7 +1905,8 @@ th {
     width: 100%;
   }
 
-  .yield-alert-panel {
+  .stock-alert-panel,
+  .stock-alert-card-wide {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
