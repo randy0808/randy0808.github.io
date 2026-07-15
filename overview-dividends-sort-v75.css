@@ -11,6 +11,18 @@
   cursor: pointer;
 }
 
+.dividend-panel,
+.dividend-panel .entry-quick-stats,
+.dividend-bottom-grid,
+.dividend-payers,
+.dividend-payers * {
+  overflow-anchor: none;
+}
+
+.dividend-payers {
+  scroll-behavior: auto;
+}
+
 .dividend-payer-header .dividend-sort-header:hover,
 .dividend-payer-header .dividend-sort-header:focus-visible,
 .dividend-payer-header .dividend-sort-header.is-active {
