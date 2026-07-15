@@ -91,7 +91,14 @@ const ETF_SYMBOLS = new Set([
   "XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"
 ]);
 
+const BANK_STOCK_SYMBOLS = new Set([
+  "ALLY", "BAC", "BK", "C", "CMA", "COF", "CFG", "FITB", "GS", "HBAN",
+  "JPM", "KEY", "MS", "MTB", "PNC", "RF", "SCHW", "STT", "TFC", "USB",
+  "WFC", "ZION"
+]);
+
 const ETF_NAME_PATTERN = /\b(ETF|ETN|INDEX FUND|VANGUARD|ISHARES|SPDR|INVESCO|VANECK|SCHWAB|GLOBAL X|WISDOMTREE|PROSHARES|ARK|DIMENSIONAL|FIDELITY)\b/i;
+const BANK_NAME_PATTERN = /\b(bank|bancorp|bancshares|bankshares|wells fargo|jpmorgan|citigroup|goldman sachs|morgan stanley)\b/i;
 
 const CRYPTO_ALIASES = {
   btc: { id: "bitcoin", symbol: "BTC", name: "Bitcoin" },
@@ -876,6 +883,14 @@ function isEtfLikePosition(position) {
   return ETF_NAME_PATTERN.test(name);
 }
 
+function isBankStockPosition(position) {
+  if (!position || position.kind !== "us-stock") return false;
+  const symbol = normalizedTicker(position);
+  const baseSymbol = normalizeSecTicker(symbol.replace(/\.(US|NYSE|NASDAQ)$/i, ""));
+  const name = String(position.name || "").trim();
+  return BANK_STOCK_SYMBOLS.has(baseSymbol) || BANK_NAME_PATTERN.test(name);
+}
+
 function isYieldAlertCandidate(position) {
   return Boolean(
     position
@@ -938,7 +953,7 @@ function getAssetStockAlertRows() {
 }
 
 function isGrowthStockAlertCandidate(position) {
-  return isFundamentalAlertCandidate(position);
+  return isFundamentalAlertCandidate(position) && !isBankStockPosition(position);
 }
 
 function getGrowthStockAlertRows() {
@@ -1489,7 +1504,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>PE <= ${GROWTH_PE_THRESHOLD}，或股價低於保守 EPS 成長合理價</span>
+        <span>非銀行股，PE <= ${GROWTH_PE_THRESHOLD}，或股價低於保守 EPS 成長合理價</span>
       </div>
       <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在更新財務資料" : "目前沒有符合條件"}</span>`}</div>
     </div>
