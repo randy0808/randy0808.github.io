@@ -48,7 +48,12 @@
   z-index: 35;
 }
 
-.dividend-month-tooltip {
+.dividend-month-card > .dividend-month-tooltip {
+  display: none !important;
+}
+
+.dividend-month-tooltip,
+.dividend-month-floating-tooltip {
   position: absolute;
   bottom: 100%;
   left: 0;
@@ -66,6 +71,22 @@
   pointer-events: none;
   transform: translateY(4px);
   transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.dividend-month-floating-tooltip {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 10000;
+  width: min(640px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 24px));
+  transform: translateY(6px);
+}
+
+.dividend-month-floating-tooltip.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .dividend-month-card:nth-child(6n),
@@ -129,7 +150,8 @@
   white-space: nowrap;
 }
 
-.dividend-month-tooltip small {
+.dividend-month-tooltip small,
+.dividend-month-floating-tooltip small {
   color: var(--muted);
   font-weight: 800;
 }
@@ -191,6 +213,11 @@
   .dividend-month-tooltip {
     width: min(340px, calc(100vw - 32px));
     max-height: min(460px, calc(100vh - 120px));
+  }
+
+  .dividend-month-floating-tooltip {
+    width: min(420px, calc(100vw - 24px));
+    max-height: min(560px, calc(100vh - 24px));
   }
 
   .dividend-month-card:nth-child(2n) .dividend-month-tooltip {
