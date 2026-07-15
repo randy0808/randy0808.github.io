@@ -17,7 +17,7 @@ const APP_SHELL = [
   "./holdings-sticky-v65.js?v=91",
   "./app-v58.js?v=91",
   "./app-v47.js?v=91",
-  "./asset-detail-v53.js?v=91",
+  "./asset-detail-v53.js?v=90",
   "./manifest.webmanifest",
   "./icon.svg"
 ];
