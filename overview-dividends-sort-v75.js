@@ -1,9 +1,20 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v86";
+  const PATCH_KEY = "wealthtrack.dividendSort.v87";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
 
   const MONTHLY_SYMBOLS_V75 = new Set(["O", "SGOV"]);
+  const KNOWN_DIVIDEND_SCHEDULES_V75 = {
+    "0056.TW": [0, 3, 6, 9],
+    "00878.TW": [1, 4, 7, 10],
+    "00713.TW": [2, 5, 8, 11],
+    "0050.TW": [0, 6]
+  };
+  const QUARTERLY_DIVIDEND_SCHEDULES_V75 = [
+    [0, 3, 6, 9],
+    [1, 4, 7, 10],
+    [2, 5, 8, 11]
+  ];
   const DIVIDEND_SOURCE_NOTE_V75 = "美股以 Payable Date 配發月估算並預扣 30% 股息稅；複委託實際入帳可能晚 1-3 個工作天；台股未扣二代健保、匯費。";
   const DIVIDEND_SORT_STORAGE_KEY = "wealthtrack.dividendSortMode";
   const DIVIDEND_SORT_DEFAULTS = {
@@ -22,14 +33,14 @@
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=86")) {
-        existing.href = "overview-dividends-sort-v75.css?v=86";
+      if (!String(existing.getAttribute("href") || "").includes("v=87")) {
+        existing.href = "overview-dividends-sort-v75.css?v=87";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=86";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=87";
     document.head.appendChild(stylesheet);
   }
 
@@ -206,32 +217,116 @@
     return position?.kind === "us-stock" && MONTHLY_SYMBOLS_V75.has(normalizeSymbolForDividendV75(position));
   }
 
-  function getNormalizedMonthAmountsV75(row) {
-    const profile = row.profile || {};
-    const monthAmounts = profile.monthAmounts && typeof profile.monthAmounts === "object" ? { ...profile.monthAmounts } : {};
+  function sanitizeMonthAmountsV75(rawMonthAmounts) {
+    const result = {};
+    if (!rawMonthAmounts || typeof rawMonthAmounts !== "object") return result;
 
-    if (!isMonthlyDividendPositionV75(row.position)) return monthAmounts;
+    const entries = Object.entries(rawMonthAmounts);
+    const numericKeys = entries
+      .map(([key]) => Number(key))
+      .filter((key) => Number.isFinite(key));
+    const looksOneBased = numericKeys.includes(12) && !numericKeys.includes(0);
 
-    const observedAmounts = Object.values(monthAmounts)
+    for (const [key, rawValue] of entries) {
+      const numericKey = Number(key);
+      const index = looksOneBased ? numericKey - 1 : numericKey;
+      const monthIndex = Math.trunc(index);
+      const amount = Number(rawValue);
+      if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) continue;
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+      result[monthIndex] = (Number(result[monthIndex]) || 0) + amount;
+    }
+
+    return result;
+  }
+
+  function getKnownDividendScheduleV75(position) {
+    const symbol = normalizeSymbolForDividendV75(position);
+    if (isMonthlyDividendPositionV75(position)) {
+      return Array.from({ length: 12 }, (_, index) => index);
+    }
+    return KNOWN_DIVIDEND_SCHEDULES_V75[symbol] || null;
+  }
+
+  function inferQuarterlyDividendScheduleV75(monthAmounts, profile) {
+    const monthKeys = Object.keys(monthAmounts)
       .map(Number)
-      .filter((value) => Number.isFinite(value) && value > 0);
-    const annualPerShare = Number(profile.annualPerShare);
-    const monthlyFallback = observedAmounts.length
-      ? observedAmounts.reduce((sum, value) => sum + value, 0) / observedAmounts.length
-      : Number.isFinite(annualPerShare) && annualPerShare > 0
-        ? annualPerShare / 12
-        : 0;
+      .filter((index) => Number.isInteger(index) && index >= 0 && index <= 11);
+    const profileMonths = Array.isArray(profile?.months)
+      ? profile.months
+          .map(Number)
+          .filter((index) => Number.isInteger(index) && index >= 0 && index <= 11)
+      : [];
+    const observedMonths = Array.from(new Set([...monthKeys, ...profileMonths])).sort((a, b) => a - b);
+    const frequency = Number(profile?.frequency);
 
-    if (monthlyFallback <= 0) return monthAmounts;
+    if (Number.isFinite(frequency) && frequency >= 10) {
+      return Array.from({ length: 12 }, (_, index) => index);
+    }
 
-    for (let index = 0; index < 12; index += 1) {
-      const existingAmount = Number(monthAmounts[index]);
-      if (!Number.isFinite(existingAmount) || existingAmount <= 0) {
-        monthAmounts[index] = monthlyFallback;
+    if (!observedMonths.length) return null;
+    const observedSet = new Set(observedMonths);
+    let bestSchedule = null;
+    let bestScore = 0;
+
+    for (const schedule of QUARTERLY_DIVIDEND_SCHEDULES_V75) {
+      const score = schedule.filter((monthIndex) => observedSet.has(monthIndex)).length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestSchedule = schedule;
       }
     }
 
-    return monthAmounts;
+    if (Number.isFinite(frequency) && frequency >= 4 && bestScore >= 1) return bestSchedule;
+    if (observedMonths.length >= 2 && bestScore >= 2) return bestSchedule;
+    return null;
+  }
+
+  function getFallbackMonthAmountV75(monthAmounts, profile, scheduleLength) {
+    const observedAmounts = Object.values(monthAmounts)
+      .map(Number)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (observedAmounts.length) {
+      return observedAmounts.reduce((sum, value) => sum + value, 0) / observedAmounts.length;
+    }
+
+    const annualPerShare = Number(profile?.annualPerShare);
+    if (Number.isFinite(annualPerShare) && annualPerShare > 0 && scheduleLength > 0) {
+      return annualPerShare / scheduleLength;
+    }
+
+    const lastDividendPerShare = Number(profile?.lastDividendPerShare);
+    return Number.isFinite(lastDividendPerShare) && lastDividendPerShare > 0 ? lastDividendPerShare : 0;
+  }
+
+  function buildScheduledMonthAmountsV75(monthAmounts, schedule, fallbackAmount, options = {}) {
+    const result = options.keepExisting ? { ...monthAmounts } : {};
+    for (const monthIndex of schedule || []) {
+      const existingAmount = Number(monthAmounts[monthIndex]);
+      result[monthIndex] = Number.isFinite(existingAmount) && existingAmount > 0
+        ? existingAmount
+        : fallbackAmount;
+    }
+    return result;
+  }
+
+  function getNormalizedMonthAmountsV75(row) {
+    const profile = row.profile || {};
+    const monthAmounts = sanitizeMonthAmountsV75(profile.monthAmounts);
+    const knownSchedule = getKnownDividendScheduleV75(row.position);
+
+    if (knownSchedule) {
+      const fallbackAmount = getFallbackMonthAmountV75(monthAmounts, profile, knownSchedule.length);
+      if (fallbackAmount <= 0) return monthAmounts;
+      return buildScheduledMonthAmountsV75(monthAmounts, knownSchedule, fallbackAmount);
+    }
+
+    const inferredSchedule = inferQuarterlyDividendScheduleV75(monthAmounts, profile);
+    if (!inferredSchedule) return monthAmounts;
+
+    const fallbackAmount = getFallbackMonthAmountV75(monthAmounts, profile, inferredSchedule.length);
+    if (fallbackAmount <= 0) return monthAmounts;
+    return buildScheduledMonthAmountsV75(monthAmounts, inferredSchedule, fallbackAmount, { keepExisting: true });
   }
 
   function compareDividendPayersV75(a, b) {
