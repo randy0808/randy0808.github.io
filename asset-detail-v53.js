@@ -327,8 +327,10 @@ async function loadFundamentals() {
 }
 
 function mergeFundamentalRows(primaryRows, secondaryRows) {
+  const ttmRow = [...secondaryRows, ...primaryRows].find(isTtmFundamentalRow);
   const byYear = new Map();
   [...secondaryRows, ...primaryRows].forEach((row) => {
+    if (isTtmFundamentalRow(row)) return;
     const year = Number(row.year);
     if (!isReasonableReportYear(year)) return;
     const existing = byYear.get(year) || { year };
@@ -341,7 +343,12 @@ function mergeFundamentalRows(primaryRows, secondaryRows) {
       interestCoverage: firstFinite(row.interestCoverage, existing.interestCoverage)
     });
   });
-  return [...byYear.values()].sort((a, b) => b.year - a.year).slice(0, 10);
+  const annualRows = [...byYear.values()].sort((a, b) => b.year - a.year).slice(0, 10);
+  return ttmRow ? [{ ...ttmRow, year: "TTM", period: "TTM" }, ...annualRows] : annualRows;
+}
+
+function isTtmFundamentalRow(row) {
+  return String(row?.period || row?.year || "").toUpperCase() === "TTM";
 }
 
 function firstFinite(...values) {
@@ -875,6 +882,18 @@ async function fetchYahooFundamentals(target) {
   const end = Math.floor(Date.now() / 1000) + 86400;
   const start = Math.floor(Date.UTC(new Date().getFullYear() - 11, 0, 1) / 1000);
   const types = [
+    "trailingDilutedEPS",
+    "trailingBasicEPS",
+    "trailingFreeCashFlow",
+    "trailingOperatingCashFlow",
+    "trailingCapitalExpenditure",
+    "trailingTotalRevenue",
+    "trailingNetIncome",
+    "quarterlyStockholdersEquity",
+    "trailingOperatingIncome",
+    "trailingInterestExpense",
+    "trailingEBIT",
+    "trailingPretaxIncome",
     "annualDilutedEPS",
     "annualBasicEPS",
     "annualFreeCashFlow",
@@ -905,10 +924,20 @@ async function fetchYahooFundamentals(target) {
 
 function parseYahooFundamentalRows(data) {
   const series = {};
+  const trailing = {};
+  const quarterly = {};
   (data?.timeseries?.result || []).forEach((entry) => {
     const type = entry?.meta?.type?.[0];
     if (!type || !Array.isArray(entry[type])) return;
     entry[type].forEach((point) => {
+      if (type.startsWith("trailing")) {
+        storeLatestFinancialPoint(trailing, type, point);
+        return;
+      }
+      if (type === "quarterlyStockholdersEquity") {
+        storeLatestFinancialPoint(quarterly, "equity", point);
+        return;
+      }
       const year = Number(String(point.asOfDate || "").slice(0, 4));
       const value = Number(point?.reportedValue?.raw);
       if (!isReasonableReportYear(year) || !Number.isFinite(value)) return;
@@ -927,7 +956,8 @@ function parseYahooFundamentalRows(data) {
       if (type === "annualPretaxIncome") series[year].pretaxIncome = value;
     });
   });
-  return Object.values(series).sort((a, b) => b.year - a.year).slice(0, 10).map((row) => {
+  const ttmRow = buildYahooTtmRow(trailing, quarterly);
+  const annualRows = Object.values(series).sort((a, b) => b.year - a.year).slice(0, 10).map((row) => {
     const prevEquity = series[row.year - 1]?.equity;
     const averageEquity = Number.isFinite(row.equity) && Number.isFinite(prevEquity)
       ? (row.equity + prevEquity) / 2
@@ -952,6 +982,62 @@ function parseYahooFundamentalRows(data) {
       interestCoverage: Number.isFinite(coverageNumerator) && Number.isFinite(interest) && interest > 0 ? coverageNumerator / interest : NaN
     };
   });
+  return ttmRow ? [ttmRow, ...annualRows] : annualRows;
+}
+
+function storeLatestFinancialPoint(target, key, point) {
+  const value = Number(point?.reportedValue?.raw);
+  if (!Number.isFinite(value)) return;
+  const asOfTime = Date.parse(`${point.asOfDate || ""}T00:00:00Z`);
+  const timestamp = Number(point.timestamp) * 1000;
+  const time = Number.isFinite(asOfTime) ? asOfTime : timestamp;
+  const existing = target[key];
+  if (!existing || Number(time || 0) >= Number(existing.time || 0)) {
+    target[key] = { value, time };
+  }
+}
+
+function latestFinancialValue(target, key) {
+  return target?.[key] ? Number(target[key].value) : NaN;
+}
+
+function buildYahooTtmRow(trailing, quarterly) {
+  const eps = firstFinite(
+    latestFinancialValue(trailing, "trailingDilutedEPS"),
+    latestFinancialValue(trailing, "trailingBasicEPS")
+  );
+  const netIncome = latestFinancialValue(trailing, "trailingNetIncome");
+  const revenue = latestFinancialValue(trailing, "trailingTotalRevenue");
+  const equity = latestFinancialValue(quarterly, "equity");
+  const operatingCashFlow = latestFinancialValue(trailing, "trailingOperatingCashFlow");
+  const capex = latestFinancialValue(trailing, "trailingCapitalExpenditure");
+  const directFcf = latestFinancialValue(trailing, "trailingFreeCashFlow");
+  const operatingIncome = latestFinancialValue(trailing, "trailingOperatingIncome");
+  const ebit = latestFinancialValue(trailing, "trailingEBIT");
+  const pretaxIncome = latestFinancialValue(trailing, "trailingPretaxIncome");
+  const interest = Math.abs(Number(latestFinancialValue(trailing, "trailingInterestExpense")));
+  const computedFcf = Number.isFinite(operatingCashFlow) && Number.isFinite(capex)
+    ? operatingCashFlow - Math.abs(capex)
+    : NaN;
+  const coverageNumerator = Number.isFinite(ebit)
+    ? ebit
+    : Number.isFinite(operatingIncome)
+      ? operatingIncome
+      : Number.isFinite(pretaxIncome) && Number.isFinite(interest)
+        ? pretaxIncome + interest
+        : NaN;
+  const row = {
+    year: "TTM",
+    period: "TTM",
+    eps,
+    roe: Number.isFinite(netIncome) && Number.isFinite(equity) && equity !== 0 ? (netIncome / equity) * 100 : NaN,
+    fcf: firstFinite(directFcf, computedFcf, operatingCashFlow),
+    netMargin: Number.isFinite(netIncome) && Number.isFinite(revenue) && revenue !== 0 ? (netIncome / revenue) * 100 : NaN,
+    interestCoverage: Number.isFinite(coverageNumerator) && Number.isFinite(interest) && interest > 0 ? coverageNumerator / interest : NaN
+  };
+  return ["eps", "roe", "fcf", "netMargin", "interestCoverage"].some((key) => Number.isFinite(Number(row[key])))
+    ? row
+    : null;
 }
 
 async function findCik(symbol) {
@@ -1079,8 +1165,10 @@ function renderFundamentalTable(rows) {
     dom.fundamentalTableBody.innerHTML = emptyRow("沒有足夠的 SEC 年度資料", FINANCIAL_TABLE_COLSPAN);
     return;
   }
-  const displayRows = addEpsGrowth(rows);
+  const annualRows = rows.filter((row) => !isTtmFundamentalRow(row));
+  const displayRows = addEpsGrowth(annualRows);
   const averageRow = buildFiveYearAverageRow(displayRows);
+  const ttmRow = buildTtmDisplayRow(rows.find(isTtmFundamentalRow), displayRows);
   const averageMarkup = averageRow ? `
     <tr class="financial-average-row">
       <td>5 Year Average</td>
@@ -1092,7 +1180,18 @@ function renderFundamentalTable(rows) {
       <td>--</td>
     </tr>
   ` : "";
-  dom.fundamentalTableBody.innerHTML = averageMarkup + displayRows.map((row) => `
+  const ttmMarkup = ttmRow ? `
+    <tr class="financial-ttm-row">
+      <td>TTM</td>
+      <td>${formatNumber(ttmRow.eps, 2)}</td>
+      <td>${formatPlainPercent(ttmRow.epsGrowth)}</td>
+      <td>${formatPlainPercent(ttmRow.roe)}</td>
+      <td>${formatCompactCurrency(ttmRow.fcf, "USD")}</td>
+      <td>${formatPlainPercent(ttmRow.netMargin)}</td>
+      <td>${formatRatio(ttmRow.interestCoverage)}</td>
+    </tr>
+  ` : "";
+  dom.fundamentalTableBody.innerHTML = averageMarkup + ttmMarkup + displayRows.map((row) => `
     <tr>
       <td>${row.year}</td>
       <td>${formatNumber(row.eps, 2)}</td>
@@ -1103,6 +1202,21 @@ function renderFundamentalTable(rows) {
       <td>${formatRatio(row.interestCoverage)}</td>
     </tr>
   `).join("");
+}
+
+function buildTtmDisplayRow(rawTtmRow, annualRows) {
+  const latestAnnual = annualRows.find((row) => Number.isFinite(Number(row.eps))) || annualRows[0];
+  const source = rawTtmRow || latestAnnual;
+  if (!source) return null;
+  const eps = Number(source.eps);
+  const previousEps = Number(latestAnnual?.eps);
+  const computedGrowth = rawTtmRow && Number.isFinite(eps) && Number.isFinite(previousEps) && previousEps !== 0
+    ? ((eps - previousEps) / Math.abs(previousEps)) * 100
+    : Number(source.epsGrowth);
+  return {
+    ...source,
+    epsGrowth: firstFinite(source.epsGrowth, computedGrowth)
+  };
 }
 
 function addEpsGrowth(rows) {
@@ -1371,7 +1485,7 @@ function setCachedFundamentals(item, rows, source) {
     const payload = {
       savedAt: Date.now(),
       source,
-      rows: sanitizeFundamentalRows(rows).slice(0, 10)
+      rows: sanitizeFundamentalRows(rows).slice(0, 11)
     };
     localStorage.setItem(fundamentalsCacheKey(item), JSON.stringify(payload));
   } catch (error) {
@@ -1382,6 +1496,18 @@ function setCachedFundamentals(item, rows, source) {
 function sanitizeFundamentalRows(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.map((row) => {
+    if (isTtmFundamentalRow(row)) {
+      return {
+        year: "TTM",
+        period: "TTM",
+        eps: finiteOrUndefined(row.eps),
+        epsGrowth: finiteOrUndefined(row.epsGrowth),
+        roe: finiteOrUndefined(row.roe),
+        fcf: finiteOrUndefined(row.fcf),
+        netMargin: finiteOrUndefined(row.netMargin),
+        interestCoverage: finiteOrUndefined(row.interestCoverage)
+      };
+    }
     const year = Number(row?.year);
     if (!isReasonableReportYear(year)) return null;
     return {
