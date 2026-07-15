@@ -1531,6 +1531,73 @@ select:focus {
   width: min(260px, 100%);
 }
 
+.yield-alert-panel {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.9fr) minmax(220px, 1.6fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 48%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-soft) 88%, var(--primary) 12%);
+}
+
+.yield-alert-main {
+  display: grid;
+  gap: 2px;
+}
+
+.yield-alert-main strong,
+.yield-alert-chip strong {
+  color: var(--text);
+  font-weight: 850;
+}
+
+.yield-alert-main span,
+.yield-alert-state,
+.yield-alert-more {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.yield-alert-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.yield-alert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 78%, var(--primary) 22%);
+}
+
+.yield-alert-chip span {
+  color: var(--success);
+  font-weight: 800;
+}
+
+.yield-alert-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.yield-alert-button {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--primary) 55%, var(--line));
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  padding: 0 12px;
+  font-weight: 850;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -1817,6 +1884,20 @@ th {
   .holdings-tools,
   .search-box {
     width: 100%;
+  }
+
+  .yield-alert-panel {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .yield-alert-actions,
+  .yield-alert-button {
+    width: 100%;
+  }
+
+  .yield-alert-actions {
+    justify-content: stretch;
   }
 
   .summary-grid,
