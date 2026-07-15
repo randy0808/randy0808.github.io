@@ -1208,7 +1208,7 @@ function ensureYieldAlertPanel() {
 
   panel = document.createElement("div");
   panel.id = "yieldAlertPanel";
-  panel.className = "yield-alert-panel is-hidden";
+  panel.className = "stock-alert-panel is-hidden";
   holdingsPanel.insertBefore(panel, tableWrap);
   return panel;
 }
@@ -1218,12 +1218,6 @@ function renderYieldAlerts() {
   if (!panel) return;
 
   const alerts = getYieldAlertRows();
-  if (!alerts.length) {
-    panel.classList.add("is-hidden");
-    panel.innerHTML = "";
-    return;
-  }
-
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
@@ -1236,15 +1230,31 @@ function renderYieldAlerts() {
     : `<span class="yield-alert-state">${permission === "granted" ? "系統通知已開啟" : permission === "denied" ? "通知目前被瀏覽器封鎖" : "此瀏覽器不支援系統通知"}</span>`;
 
   panel.innerHTML = `
-    <div class="yield-alert-main">
-      <strong>殖利率提醒</strong>
-      <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
+    <div class="stock-alert-card stock-alert-card-wide">
+      <div class="stock-alert-main">
+        <strong>股息股提醒</strong>
+        <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
+      </div>
+      <div class="yield-alert-list">${alertItems || `<span class="stock-alert-empty">目前沒有符合條件</span>`}</div>
+      <div class="yield-alert-actions">${action}</div>
     </div>
-    <div class="yield-alert-list">${alertItems}</div>
-    <div class="yield-alert-actions">${action}</div>
+    <div class="stock-alert-card">
+      <div class="stock-alert-main">
+        <strong>成長股提醒</strong>
+        <span>等待設定篩選條件</span>
+      </div>
+      <span class="stock-alert-empty">下一步加入條件後啟用</span>
+    </div>
+    <div class="stock-alert-card">
+      <div class="stock-alert-main">
+        <strong>資產股提醒</strong>
+        <span>等待設定篩選條件</span>
+      </div>
+      <span class="stock-alert-empty">下一步加入條件後啟用</span>
+    </div>
   `;
   panel.classList.remove("is-hidden");
-  maybeNotifyYieldAlerts(alerts);
+  if (alerts.length) maybeNotifyYieldAlerts(alerts);
 }
 
 function maybeNotifyYieldAlerts(alerts, options = {}) {
@@ -1262,7 +1272,7 @@ function maybeNotifyYieldAlerts(alerts, options = {}) {
     .join("、");
 
   try {
-    new Notification("殖利率提醒", {
+    new Notification("股息股提醒", {
       body: `${summary} 已超過 ${YIELD_ALERT_THRESHOLD}%`,
       icon: "icon.svg",
       tag: `wealthtrack-yield-alert-${today}`,
