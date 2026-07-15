@@ -189,7 +189,8 @@ const DEFAULT_COLUMN_ORDER = [
   "averageCost",
   "price",
   "value",
-  "profit"
+  "profit",
+  "profitPercent"
 ];
 
 const DATA_COLUMNS = [
@@ -200,7 +201,8 @@ const DATA_COLUMNS = [
   { id: "averageCost", label: "平均成本", sortField: "averageCost", align: "right" },
   { id: "price", label: "現價", sortField: "price", align: "right" },
   { id: "value", label: "市值", sortField: "value", align: "right" },
-  { id: "profit", label: "損益", sortField: "profitPercent", align: "right" }
+  { id: "profit", label: "損益金額", sortField: "profit", align: "right" },
+  { id: "profitPercent", label: "損益率", sortField: "profitPercent", align: "right" }
 ];
 
 const DATA_COLUMN_MAP = Object.fromEntries(DATA_COLUMNS.map((column) => [column.id, column]));
@@ -672,28 +674,6 @@ function formatPercent(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-function renderGrowthChange(change, changePercent) {
-  if (!dom.growthChange) return;
-  if (!Number.isFinite(change)) {
-    dom.growthChange.textContent = "--";
-    dom.growthChange.className = "";
-    dom.growthChange.removeAttribute("aria-label");
-    return;
-  }
-
-  const amountText = formatSensitiveCurrency(change);
-  const percentText = formatPercent(changePercent);
-  const amount = document.createElement("span");
-  const percent = document.createElement("span");
-  amount.className = "growth-change-amount";
-  percent.className = "growth-change-percent";
-  amount.textContent = amountText;
-  percent.textContent = percentText;
-  dom.growthChange.replaceChildren(amount, percent);
-  dom.growthChange.className = sensitiveClass(change) || valueClass(change);
-  dom.growthChange.setAttribute("aria-label", `${amountText} ${percentText}`);
-}
-
 function formatPlainPercent(value, maximumFractionDigits = 1) {
   if (!Number.isFinite(value)) return "--";
   return `${value.toFixed(maximumFractionDigits)}%`;
@@ -943,7 +923,7 @@ function drawGrowthChart(totals = calculatePortfolio()) {
     ctx.font = "700 15px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("等待今日資產紀錄", width / 2, height / 2);
-    renderGrowthChange(NaN, NaN);
+    if (dom.growthChange) dom.growthChange.textContent = "--";
     return;
   }
 
@@ -1034,7 +1014,10 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   const lastValue = convertCurrency(points[points.length - 1].valueTwd, "TWD", state.baseCurrency);
   const change = lastValue - firstValue;
   const changePercent = firstValue > 0 ? (change / firstValue) * 100 : NaN;
-  renderGrowthChange(change, changePercent);
+  if (dom.growthChange) {
+    dom.growthChange.textContent = `${formatSensitiveCurrency(change)} ${formatPercent(changePercent)}`;
+    dom.growthChange.className = sensitiveClass(change) || valueClass(change);
+  }
 
   ctx.fillStyle = muted;
   ctx.font = "700 11px system-ui, sans-serif";
@@ -1556,12 +1539,11 @@ function renderCell(columnId, position, metrics) {
   }
 
   if (columnId === "profit") {
-    return `
-      <td class="${profitAmountClass}">
-        ${formatWholeSensitiveCurrency(metrics.profit)}
-        <div class="${profitPercentClass}">${formatPercent(metrics.profitPercent)}</div>
-      </td>
-    `;
+    return `<td class="${profitAmountClass}">${formatWholeSensitiveCurrency(metrics.profit)}</td>`;
+  }
+
+  if (columnId === "profitPercent") {
+    return `<td class="${profitPercentClass}">${formatPercent(metrics.profitPercent)}</td>`;
   }
 
   return "<td>--</td>";
@@ -1619,10 +1601,8 @@ function renderRowsLegacy() {
         </div>
       </td>
       <td class="${currentValueClass}">${formatCurrency(metrics.currentValue)}</td>
-      <td class="${profitClass}">
-        ${formatWholeSensitiveCurrency(metrics.profit)}
-        <div>${formatPercent(metrics.profitPercent)}</div>
-      </td>
+      <td class="${profitClass}">${formatWholeSensitiveCurrency(metrics.profit)}</td>
+      <td class="${valueClass(metrics.profitPercent)}">${formatPercent(metrics.profitPercent)}</td>
       <td>
         <div class="row-actions">
           <button class="row-button" type="button" data-action="edit" data-id="${escapeHtml(position.id)}">編輯</button>
@@ -2836,7 +2816,7 @@ function spreadsheetRows() {
     "現價",
     "現價幣別",
     `市值 (${state.baseCurrency})`,
-    `損益 (${state.baseCurrency})`,
+    `損益金額 (${state.baseCurrency})`,
     "損益率",
     "報價來源",
     "報價時間"
