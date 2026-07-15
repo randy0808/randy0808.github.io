@@ -1225,14 +1225,12 @@ function renderYieldAlerts() {
   }
 
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
-  const topAlerts = alerts.slice(0, 5);
-  const alertItems = topAlerts.map(({ position, metrics }) => `
+  const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
       <strong>${escapeHtml(position.symbol)}</strong>
       <span>${formatPlainPercent(metrics.currentDividendYield, 2)}</span>
     </span>
   `).join("");
-  const moreLabel = alerts.length > topAlerts.length ? `<span class="yield-alert-more">另 ${alerts.length - topAlerts.length} 檔</span>` : "";
   const action = permission === "default"
     ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
     : `<span class="yield-alert-state">${permission === "granted" ? "系統通知已開啟" : permission === "denied" ? "通知目前被瀏覽器封鎖" : "此瀏覽器不支援系統通知"}</span>`;
@@ -1242,7 +1240,7 @@ function renderYieldAlerts() {
       <strong>殖利率提醒</strong>
       <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
     </div>
-    <div class="yield-alert-list">${alertItems}${moreLabel}</div>
+    <div class="yield-alert-list">${alertItems}</div>
     <div class="yield-alert-actions">${action}</div>
   `;
   panel.classList.remove("is-hidden");
@@ -1260,14 +1258,12 @@ function maybeNotifyYieldAlerts(alerts, options = {}) {
   if (!freshAlerts.length) return;
 
   const summary = freshAlerts
-    .slice(0, 4)
     .map(({ position, metrics }) => `${position.symbol} ${formatPlainPercent(metrics.currentDividendYield, 2)}`)
     .join("、");
-  const more = freshAlerts.length > 4 ? `，另 ${freshAlerts.length - 4} 檔` : "";
 
   try {
     new Notification("殖利率提醒", {
-      body: `${summary}${more} 已超過 ${YIELD_ALERT_THRESHOLD}%`,
+      body: `${summary} 已超過 ${YIELD_ALERT_THRESHOLD}%`,
       icon: "icon.svg",
       tag: `wealthtrack-yield-alert-${today}`,
       renotify: false
