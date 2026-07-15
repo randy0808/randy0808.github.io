@@ -12,6 +12,10 @@ const DIVIDEND_CACHE_MS = 24 * 60 * 60 * 1000;
 const DIVIDEND_FETCH_DELAY_MS = 350;
 const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
+const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
+const FUNDAMENTAL_FETCH_DELAY_MS = 350;
+const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
+const ASSET_STOCK_PB_THRESHOLD = 0.8;
 const HISTORY_START_DATE = "2026-07-10";
 const HISTORY_MAX_POINTS = 2_500;
 const HISTORY_MIN_POINT_GAP_MS = 60_000;
@@ -30,6 +34,52 @@ const SYNC_GIST_DESCRIPTION = "WealthTrack private sync";
 const DEVICE_SYNC_HASH_PREFIX = "#sync=";
 const YIELD_ALERT_THRESHOLD = 4;
 const YIELD_ALERT_STORAGE_KEY = "wealthtrack.yieldAlerts.v1";
+
+const SEC_STATIC_CIKS = {
+  AAPL: 320193,
+  AMD: 2488,
+  AMZN: 1018724,
+  ASML: 937966,
+  AWR: 1056903,
+  BA: 12927,
+  BAC: 70858,
+  BEN: 38777,
+  "BRK-B": 1067983,
+  CCL: 815097,
+  COST: 909832,
+  DIS: 1744489,
+  EL: 1001250,
+  GIS: 40704,
+  GOOG: 1652044,
+  GOOGL: 1652044,
+  HRL: 48465,
+  INTC: 50863,
+  JNJ: 200406,
+  JPM: 19617,
+  KHC: 1637459,
+  KO: 21344,
+  MA: 1141391,
+  MCD: 63908,
+  META: 1326801,
+  MMM: 66740,
+  MSFT: 789019,
+  NOK: 924613,
+  NVDA: 1045810,
+  O: 726728,
+  PEP: 77476,
+  PG: 80424,
+  SBUX: 829224,
+  T: 732717,
+  TSM: 1046179,
+  TSLA: 1318605,
+  V: 1403161,
+  WFC: 72971,
+  WMT: 104169,
+  WTI: 1288403,
+  WTRG: 78128,
+  XOM: 34088,
+  YORW: 108985
+};
 
 const ETF_SYMBOLS = new Set([
   "AGG", "ANGL", "ARKK", "BIL", "BND", "DIA", "GLD", "IAU", "IVV", "IWM",
@@ -152,6 +202,12 @@ const state = {
     isRefreshing: false,
     errors: []
   },
+  fundamentals: {
+    profiles: {},
+    lastSync: null,
+    isRefreshing: false,
+    errors: []
+  },
   history: {
     points: [],
     range: "since"
@@ -177,6 +233,7 @@ const state = {
 let activeRefreshRunId = 0;
 let refreshClickFeedbackUntil = 0;
 let refreshClickFeedbackTimer = null;
+let secTickerMapPromise = null;
 
 let autoSyncTimer = null;
 
@@ -404,6 +461,12 @@ function loadState() {
         : {};
       state.dividends.lastSync = saved.dividends.lastSync || null;
     }
+    if (saved.fundamentals && typeof saved.fundamentals === "object") {
+      state.fundamentals.profiles = saved.fundamentals.profiles && typeof saved.fundamentals.profiles === "object"
+        ? saved.fundamentals.profiles
+        : {};
+      state.fundamentals.lastSync = saved.fundamentals.lastSync || null;
+    }
     if (saved.history && typeof saved.history === "object") {
       state.history.points = normalizeHistoryPoints(saved.history.points);
       state.history.range = Object.prototype.hasOwnProperty.call(HISTORY_RANGE_DAYS, saved.history.range) || saved.history.range === "since"
@@ -446,6 +509,10 @@ function saveState(options = {}) {
     dividends: {
       profiles: state.dividends.profiles,
       lastSync: state.dividends.lastSync
+    },
+    fundamentals: {
+      profiles: state.fundamentals.profiles,
+      lastSync: state.fundamentals.lastSync
     },
     history: {
       points: normalizeHistoryPoints(state.history.points),
@@ -823,6 +890,44 @@ function getYieldAlertRows() {
       && metrics.currentDividendYield >= YIELD_ALERT_THRESHOLD
     )
     .sort((a, b) => b.metrics.currentDividendYield - a.metrics.currentDividendYield);
+}
+
+function isAssetStockAlertCandidate(position) {
+  return Boolean(
+    position
+    && (position.kind === "us-stock" || position.kind === "tw-stock")
+    && !isEtfLikePosition(position)
+  );
+}
+
+function getAssetStockAlertRows() {
+  return state.positions
+    .filter(isAssetStockAlertCandidate)
+    .map((position) => {
+      const metrics = calculatePosition(position);
+      const profile = state.fundamentals.profiles[fundamentalKey(position)];
+      const quotePrice = Number(metrics.quote?.price);
+      const quoteCurrency = metrics.quoteCurrency || (position.kind === "tw-stock" ? "TWD" : "USD");
+      const bookCurrency = profile?.currency || quoteCurrency;
+      const bookValue = convertCurrency(Number(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
+      const computedPriceToBook = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(bookValue) && bookValue > 0
+        ? quotePrice / bookValue
+        : NaN;
+      return {
+        position,
+        metrics,
+        profile,
+        bookValue,
+        priceToBook: firstFiniteNumber(computedPriceToBook, profile?.priceToBook)
+      };
+    })
+    .filter(({ profile, priceToBook }) =>
+      profile
+      && !profile.error
+      && Number.isFinite(priceToBook)
+      && priceToBook <= ASSET_STOCK_PB_THRESHOLD
+    )
+    .sort((a, b) => a.priceToBook - b.priceToBook);
 }
 
 function calculatePortfolio() {
@@ -1218,6 +1323,7 @@ function renderYieldAlerts() {
   if (!panel) return;
 
   const alerts = getYieldAlertRows();
+  const assetStockAlerts = getAssetStockAlertRows();
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
@@ -1225,6 +1331,17 @@ function renderYieldAlerts() {
       <span>${formatPlainPercent(metrics.currentDividendYield, 2)}</span>
     </span>
   `).join("");
+  const assetStockItems = assetStockAlerts.map(({ position, priceToBook }) => `
+    <span class="yield-alert-chip">
+      <strong>${escapeHtml(position.symbol)}</strong>
+      <span>P/B ${formatNumber(priceToBook, 2)}</span>
+    </span>
+  `).join("");
+  const assetStockStatus = state.fundamentals.isRefreshing
+    ? "正在更新每股帳面價值"
+    : state.fundamentals.lastSync
+      ? `更新 ${formatTime(state.fundamentals.lastSync)}`
+      : "等待更新";
   const action = permission === "default"
     ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
     : `<span class="yield-alert-state">${permission === "granted" ? "系統通知已開啟" : permission === "denied" ? "通知目前被瀏覽器封鎖" : "此瀏覽器不支援系統通知"}</span>`;
@@ -1248,9 +1365,9 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>等待設定篩選條件</span>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，${assetStockStatus}</span>
       </div>
-      <span class="stock-alert-empty">下一步加入條件後啟用</span>
+      <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在搜尋符合條件的資產股" : "目前沒有符合條件"}</span>`}</div>
     </div>
   `;
   panel.classList.remove("is-hidden");
@@ -2504,6 +2621,174 @@ function dividendKey(position) {
   return `dividend:${position.kind}:${getYahooSymbol(position.marketSymbol || position.symbol, position.kind).toUpperCase()}`;
 }
 
+function fundamentalKey(position) {
+  return `fundamental:${position.kind}:${getYahooSymbol(position.marketSymbol || position.symbol, position.kind).toUpperCase()}`;
+}
+
+function fundamentalProfileIsFresh(profile) {
+  if (!profile || profile.error) return false;
+  return profile?.asOf && Date.now() - Number(profile.asOf) < FUNDAMENTAL_CACHE_MS;
+}
+
+function getFundamentalTargets({ force = false } = {}) {
+  return state.positions.filter((position) => {
+    if (!isAssetStockAlertCandidate(position)) return false;
+    if (force) return true;
+    return !fundamentalProfileIsFresh(state.fundamentals.profiles[fundamentalKey(position)]);
+  });
+}
+
+async function refreshFundamentalProfiles(options = {}) {
+  const targets = getFundamentalTargets(options);
+  if (!targets.length || state.fundamentals.isRefreshing) return;
+
+  state.fundamentals.isRefreshing = true;
+  state.fundamentals.errors = [];
+  renderYieldAlerts();
+
+  try {
+    for (const position of targets) {
+      const key = fundamentalKey(position);
+      try {
+        state.fundamentals.profiles[key] = await fetchFundamentalProfile(position);
+      } catch (error) {
+        state.fundamentals.errors.push(position.symbol);
+        state.fundamentals.profiles[key] = {
+          symbol: position.symbol,
+          currency: position.kind === "tw-stock" ? "TWD" : "USD",
+          bookValuePerShare: 0,
+          priceToBook: null,
+          source: "每股帳面價值暫缺",
+          asOf: Date.now(),
+          error: true,
+          errorMessage: error.message || "無法取得每股帳面價值"
+        };
+      }
+      saveState({ sync: false });
+      renderYieldAlerts();
+      await sleep(FUNDAMENTAL_FETCH_DELAY_MS);
+    }
+    state.fundamentals.lastSync = Date.now();
+  } finally {
+    state.fundamentals.isRefreshing = false;
+    saveState({ sync: false });
+    render();
+  }
+}
+
+async function fetchFundamentalProfile(position) {
+  if (position.kind !== "us-stock") {
+    throw new Error("P/B 資料來源暫不支援此市場");
+  }
+  return fetchSecBookValueProfile(position);
+}
+
+async function fetchSecBookValueProfile(position) {
+  const cik = await findSecCik(position.marketSymbol || position.symbol);
+  if (!cik) throw new Error("SEC CIK not found");
+  const padded = String(cik).padStart(10, "0");
+  const facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, {
+    fallbackProxy: true,
+    timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
+  });
+  const gaap = facts?.facts?.["us-gaap"] || {};
+  const dei = facts?.facts?.dei || {};
+  const equity = firstFiniteNumber(
+    latestFactValue(gaap, [
+      "StockholdersEquity",
+      "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      "StockholdersEquityAttributableToParent",
+      "ShareholdersEquity",
+      "TotalEquity",
+      "AssetsNet",
+      "PartnersCapital"
+    ], (unit) => unit === "USD"),
+    latestFactValue(gaap, ["Assets"], (unit) => unit === "USD") - latestFactValue(gaap, ["Liabilities"], (unit) => unit === "USD")
+  );
+  const shares = firstFiniteNumber(
+    latestFactValue(dei, ["EntityCommonStockSharesOutstanding"], (unit) => unit.toLowerCase().includes("shares")),
+    latestFactValue(gaap, [
+      "CommonStockSharesOutstanding",
+      "CommonStocksSharesOutstanding",
+      "WeightedAverageNumberOfDilutedSharesOutstanding",
+      "WeightedAverageNumberOfSharesOutstandingDiluted",
+      "WeightedAverageNumberOfShareDiluted",
+      "WeightedAverageNumberDilutedSharesOutstanding",
+      "WeightedAverageDilutedSharesOutstanding",
+      "WeightedAverageNumberOfSharesOutstandingBasic",
+      "WeightedAverageNumberOfShareOutstandingBasicAndDiluted"
+    ], (unit) => unit.toLowerCase().includes("shares"))
+  );
+
+  if (!Number.isFinite(equity) || equity <= 0) throw new Error("Missing stockholders equity");
+  if (!Number.isFinite(shares) || shares <= 0) throw new Error("Missing shares outstanding");
+
+  return {
+    symbol: position.symbol,
+    currency: "USD",
+    bookValuePerShare: equity / shares,
+    priceToBook: null,
+    source: "SEC companyfacts",
+    asOf: Date.now()
+  };
+}
+
+function latestFactValue(namespace, conceptNames, unitMatches) {
+  let selected = null;
+  conceptNames.forEach((conceptName, conceptIndex) => {
+    const units = namespace?.[conceptName]?.units;
+    if (!units) return;
+    Object.entries(units).forEach(([unit, facts]) => {
+      if (!unitMatches(unit) || !Array.isArray(facts)) return;
+      facts.forEach((fact) => {
+        const value = Number(fact.val);
+        if (!Number.isFinite(value)) return;
+        if (!/^(10-K|10-Q|20-F|40-F)/i.test(String(fact.form || ""))) return;
+        const candidate = {
+          value,
+          conceptIndex,
+          endTime: Date.parse(`${fact.end || ""}T00:00:00Z`) || 0,
+          filedTime: Date.parse(`${fact.filed || ""}T00:00:00Z`) || 0
+        };
+        if (!selected || shouldUseLatestFact(candidate, selected)) selected = candidate;
+      });
+    });
+  });
+  return selected ? selected.value : NaN;
+}
+
+function shouldUseLatestFact(candidate, selected) {
+  if (candidate.endTime !== selected.endTime) return candidate.endTime > selected.endTime;
+  if (candidate.filedTime !== selected.filedTime) return candidate.filedTime > selected.filedTime;
+  return candidate.conceptIndex < selected.conceptIndex;
+}
+
+async function findSecCik(symbol) {
+  const wanted = normalizeSecTicker(symbol);
+  if (SEC_STATIC_CIKS[wanted]) return SEC_STATIC_CIKS[wanted];
+  try {
+    if (!secTickerMapPromise) {
+      secTickerMapPromise = fetchJson("https://www.sec.gov/files/company_tickers.json", {
+        fallbackProxy: true,
+        timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
+      });
+    }
+    const data = await secTickerMapPromise;
+    return Object.values(data || {}).find((row) => normalizeSecTicker(row.ticker) === wanted)?.cik_str || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeSecTicker(symbol) {
+  return String(symbol || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\.(TW|TWO)$/i, "")
+    .replace(".", "-")
+    .replace(/\s+/g, "");
+}
+
 function dividendProfileIsFresh(profile) {
   if (!profile || profile.error) return false;
   if (profile.methodVersion !== DIVIDEND_PROFILE_METHOD_VERSION) return false;
@@ -2567,6 +2852,7 @@ function handleRefreshClick() {
   if (dom.syncStatus) dom.syncStatus.textContent = "已點擊更新，正在重新同步市場價格...";
   refreshPrices({ force: true, manual: true });
   refreshDividendProfiles();
+  refreshFundamentalProfiles({ force: true });
 }
 
 window.wealthtrackManualRefresh = handleRefreshClick;
@@ -2876,6 +3162,7 @@ function handleSubmit(event) {
     render();
     refreshPrices();
     refreshDividendProfiles();
+    refreshFundamentalProfiles({ force: true });
   } catch (error) {
     window.alert(error.message || "無法儲存資產");
   }
@@ -2907,10 +3194,12 @@ function deletePosition(id) {
   state.positions = state.positions.filter((item) => item.id !== id);
   delete state.quotes[quoteKey(position)];
   delete state.dividends.profiles[dividendKey(position)];
+  delete state.fundamentals.profiles[fundamentalKey(position)];
   recordCurrentAssetHistory({ force: true });
   saveState();
   render();
   refreshDividendProfiles();
+  refreshFundamentalProfiles();
 }
 
 function resetForm() {
@@ -3526,6 +3815,7 @@ function applyCloudPayload(payload) {
   render();
   refreshPrices();
   refreshDividendProfiles();
+  refreshFundamentalProfiles();
 }
 
 async function uploadCloudSync(options = {}) {
@@ -3947,6 +4237,7 @@ if (importedDeviceSync || (state.cloud.autoSync && state.cloud.token)) {
 if (state.positions.length) {
   refreshPrices();
   refreshDividendProfiles();
+  refreshFundamentalProfiles();
 }
 
 setInterval(() => {
