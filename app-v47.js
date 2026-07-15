@@ -28,6 +28,17 @@ const GITHUB_API_BASE = "https://api.github.com";
 const SYNC_FILE_NAME = "wealthtrack-sync.json";
 const SYNC_GIST_DESCRIPTION = "WealthTrack private sync";
 const DEVICE_SYNC_HASH_PREFIX = "#sync=";
+const YIELD_ALERT_THRESHOLD = 4;
+const YIELD_ALERT_STORAGE_KEY = "wealthtrack.yieldAlerts.v1";
+
+const ETF_SYMBOLS = new Set([
+  "AGG", "ANGL", "ARKK", "BIL", "BND", "DIA", "GLD", "IAU", "IVV", "IWM",
+  "JEPI", "JEPQ", "QQQ", "SCHD", "SGOV", "SHV", "SLV", "SMH", "SOXX",
+  "SPY", "TQQQ", "TLT", "VNQ", "VOO", "VT", "VTI", "VUG", "VYM", "VXUS",
+  "XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"
+]);
+
+const ETF_NAME_PATTERN = /\b(ETF|ETN|INDEX FUND|VANGUARD|ISHARES|SPDR|INVESCO|VANECK|SCHWAB|GLOBAL X|WISDOMTREE|PROSHARES|ARK|DIMENSIONAL|FIDELITY)\b/i;
 
 const CRYPTO_ALIASES = {
   btc: { id: "bitcoin", symbol: "BTC", name: "Bitcoin" },
@@ -781,6 +792,39 @@ function calculatePosition(position) {
   };
 }
 
+function normalizedTicker(position) {
+  return String(position?.symbol || position?.marketSymbol || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function isEtfLikePosition(position) {
+  if (!position || position.kind === "crypto") return false;
+  const symbol = normalizedTicker(position);
+  const baseSymbol = symbol.replace(/\.(TW|TWO)$/i, "");
+  const name = String(position.name || "").trim();
+  if (position.kind === "tw-stock" && /^00\d{2,4}$/.test(baseSymbol)) return true;
+  if (ETF_SYMBOLS.has(baseSymbol)) return true;
+  return ETF_NAME_PATTERN.test(name);
+}
+
+function isYieldAlertCandidate(position) {
+  return Boolean(
+    position
+    && (position.kind === "us-stock" || position.kind === "tw-stock")
+    && !isEtfLikePosition(position)
+  );
+}
+
+function getYieldAlertRows() {
+  return state.positions
+    .map((position) => ({ position, metrics: calculatePosition(position) }))
+    .filter(({ position, metrics }) =>
+      isYieldAlertCandidate(position)
+      && Number.isFinite(metrics.currentDividendYield)
+      && metrics.currentDividendYield >= YIELD_ALERT_THRESHOLD
+    )
+    .sort((a, b) => b.metrics.currentDividendYield - a.metrics.currentDividendYield);
+}
+
 function calculatePortfolio() {
   return state.positions.reduce(
     (totals, position) => {
@@ -1064,6 +1108,7 @@ function render() {
   }
 
   renderStatus(totals);
+  renderYieldAlerts();
   renderEntryQuickStats(totals);
   renderPortfolioDigest(totals);
   renderRows();
@@ -1130,6 +1175,126 @@ function renderStatus(totals) {
   }
 
   dom.statusMessage.textContent = `已取得 ${totals.quoted} 筆報價，自動刷新間隔 ${formatRefreshInterval(REFRESH_MS)}。`;
+}
+
+function readYieldAlertLog() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(YIELD_ALERT_STORAGE_KEY) || "{}");
+    return saved && typeof saved === "object" ? saved : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function writeYieldAlertLog(log) {
+  try {
+    localStorage.setItem(YIELD_ALERT_STORAGE_KEY, JSON.stringify(log));
+  } catch (error) {
+    console.warn("Unable to save yield alert log", error);
+  }
+}
+
+function yieldAlertKey(row) {
+  return normalizedTicker(row.position) || row.position.id;
+}
+
+function ensureYieldAlertPanel() {
+  let panel = document.querySelector("#yieldAlertPanel");
+  if (panel) return panel;
+
+  const holdingsPanel = document.querySelector(".holdings-panel");
+  const tableWrap = holdingsPanel?.querySelector(".table-wrap");
+  if (!holdingsPanel || !tableWrap) return null;
+
+  panel = document.createElement("div");
+  panel.id = "yieldAlertPanel";
+  panel.className = "yield-alert-panel is-hidden";
+  holdingsPanel.insertBefore(panel, tableWrap);
+  return panel;
+}
+
+function renderYieldAlerts() {
+  const panel = ensureYieldAlertPanel();
+  if (!panel) return;
+
+  const alerts = getYieldAlertRows();
+  if (!alerts.length) {
+    panel.classList.add("is-hidden");
+    panel.innerHTML = "";
+    return;
+  }
+
+  const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+  const topAlerts = alerts.slice(0, 5);
+  const alertItems = topAlerts.map(({ position, metrics }) => `
+    <span class="yield-alert-chip">
+      <strong>${escapeHtml(position.symbol)}</strong>
+      <span>${formatPlainPercent(metrics.currentDividendYield, 2)}</span>
+    </span>
+  `).join("");
+  const moreLabel = alerts.length > topAlerts.length ? `<span class="yield-alert-more">另 ${alerts.length - topAlerts.length} 檔</span>` : "";
+  const action = permission === "default"
+    ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
+    : `<span class="yield-alert-state">${permission === "granted" ? "系統通知已開啟" : permission === "denied" ? "通知目前被瀏覽器封鎖" : "此瀏覽器不支援系統通知"}</span>`;
+
+  panel.innerHTML = `
+    <div class="yield-alert-main">
+      <strong>殖利率提醒</strong>
+      <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
+    </div>
+    <div class="yield-alert-list">${alertItems}${moreLabel}</div>
+    <div class="yield-alert-actions">${action}</div>
+  `;
+  panel.classList.remove("is-hidden");
+  maybeNotifyYieldAlerts(alerts);
+}
+
+function maybeNotifyYieldAlerts(alerts, options = {}) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const today = taipeiDateKey();
+  const log = readYieldAlertLog();
+  const freshAlerts = alerts.filter((row) => {
+    const key = yieldAlertKey(row);
+    return options.force || log[key]?.date !== today;
+  });
+  if (!freshAlerts.length) return;
+
+  const summary = freshAlerts
+    .slice(0, 4)
+    .map(({ position, metrics }) => `${position.symbol} ${formatPlainPercent(metrics.currentDividendYield, 2)}`)
+    .join("、");
+  const more = freshAlerts.length > 4 ? `，另 ${freshAlerts.length - 4} 檔` : "";
+
+  try {
+    new Notification("殖利率提醒", {
+      body: `${summary}${more} 已超過 ${YIELD_ALERT_THRESHOLD}%`,
+      icon: "icon.svg",
+      tag: `wealthtrack-yield-alert-${today}`,
+      renotify: false
+    });
+  } catch (error) {
+    console.warn("Unable to show yield notification", error);
+  }
+
+  for (const row of freshAlerts) {
+    log[yieldAlertKey(row)] = {
+      date: today,
+      yield: Number(row.metrics.currentDividendYield.toFixed(2))
+    };
+  }
+  writeYieldAlertLog(log);
+}
+
+async function requestYieldNotificationPermission() {
+  if (typeof Notification === "undefined") {
+    window.alert("這個瀏覽器不支援系統通知，我會先保留頁面內提醒。");
+    renderYieldAlerts();
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission === "granted") maybeNotifyYieldAlerts(getYieldAlertRows(), { force: true });
+  renderYieldAlerts();
 }
 
 function formatRefreshInterval(ms) {
@@ -3728,6 +3893,12 @@ function bindEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const yieldNotificationButton = event.target.closest('[data-action="enable-yield-notifications"]');
+    if (yieldNotificationButton) {
+      event.preventDefault();
+      requestYieldNotificationPermission();
+      return;
+    }
     if (!dom.exportControl.contains(event.target)) setExportMenu(false);
   });
 
