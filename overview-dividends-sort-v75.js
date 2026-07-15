@@ -1,5 +1,5 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v88";
+  const PATCH_KEY = "wealthtrack.dividendSort.v89";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
 
@@ -64,18 +64,22 @@
   let dividendPayerUserScrollUntilV75 = 0;
   let pendingDividendRenderTimerV75 = 0;
   let patchedNativeEntryQuickStatsV75 = false;
+  let activeMonthTooltipCardV75 = null;
+  let pinnedMonthTooltipCardV75 = null;
+  let monthTooltipHideTimerV75 = 0;
+  let monthTooltipRepositionFrameV75 = 0;
 
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=88")) {
-        existing.href = "overview-dividends-sort-v75.css?v=88";
+      if (!String(existing.getAttribute("href") || "").includes("v=89")) {
+        existing.href = "overview-dividends-sort-v75.css?v=89";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=88";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=89";
     document.head.appendChild(stylesheet);
   }
 
@@ -190,11 +194,127 @@
     updateDividendSortButtonsV75(target);
   }
 
+  function getFloatingMonthTooltipV75() {
+    let tooltip = document.querySelector(".dividend-month-floating-tooltip");
+    if (tooltip) return tooltip;
+
+    tooltip = document.createElement("div");
+    tooltip.className = "dividend-month-floating-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.addEventListener("click", (event) => event.stopPropagation());
+    tooltip.addEventListener("mouseenter", () => clearTimeout(monthTooltipHideTimerV75));
+    tooltip.addEventListener("mouseleave", () => {
+      if (!pinnedMonthTooltipCardV75) hideFloatingMonthTooltipV75();
+    });
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }
+
+  function markMonthTooltipCardV75(card, isOpen) {
+    if (!card) return;
+    card.classList.toggle("is-pinned", Boolean(isOpen && pinnedMonthTooltipCardV75 === card));
+    card.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
+  function positionFloatingMonthTooltipV75(card) {
+    const tooltip = document.querySelector(".dividend-month-floating-tooltip");
+    if (!card || !tooltip || !tooltip.classList.contains("is-visible")) return;
+
+    tooltip.style.visibility = "hidden";
+    tooltip.style.left = "0px";
+    tooltip.style.top = "0px";
+    const viewportPad = 12;
+    const cardRect = card.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const width = Math.min(Math.max(360, cardRect.width * 1.55), window.innerWidth - viewportPad * 2, 640);
+    tooltip.style.width = `${Math.max(280, width)}px`;
+
+    const measured = tooltip.getBoundingClientRect();
+    let left = cardRect.left;
+    if (left + measured.width > window.innerWidth - viewportPad) {
+      left = window.innerWidth - measured.width - viewportPad;
+    }
+    left = Math.max(viewportPad, left);
+
+    let top = cardRect.top - measured.height - 12;
+    if (top < viewportPad) top = cardRect.bottom + 12;
+    if (top + measured.height > window.innerHeight - viewportPad) {
+      top = Math.max(viewportPad, window.innerHeight - measured.height - viewportPad);
+    }
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.style.visibility = "visible";
+  }
+
+  function scheduleMonthTooltipPositionV75() {
+    if (!activeMonthTooltipCardV75) return;
+    cancelAnimationFrame(monthTooltipRepositionFrameV75);
+    monthTooltipRepositionFrameV75 = requestAnimationFrame(() => {
+      monthTooltipRepositionFrameV75 = 0;
+      positionFloatingMonthTooltipV75(activeMonthTooltipCardV75);
+    });
+  }
+
+  function showFloatingMonthTooltipV75(card, options = {}) {
+    if (!card) return;
+    clearTimeout(monthTooltipHideTimerV75);
+    const source = card.querySelector(".dividend-month-tooltip");
+    if (!source) return;
+
+    const tooltip = getFloatingMonthTooltipV75();
+    tooltip.innerHTML = source.innerHTML;
+    tooltip.dataset.monthIndex = card.dataset.monthIndex || "";
+    tooltip.classList.add("is-visible");
+
+    if (activeMonthTooltipCardV75 && activeMonthTooltipCardV75 !== card && activeMonthTooltipCardV75 !== pinnedMonthTooltipCardV75) {
+      markMonthTooltipCardV75(activeMonthTooltipCardV75, false);
+    }
+    activeMonthTooltipCardV75 = card;
+
+    if (options.pin) {
+      if (pinnedMonthTooltipCardV75 && pinnedMonthTooltipCardV75 !== card) {
+        markMonthTooltipCardV75(pinnedMonthTooltipCardV75, false);
+      }
+      pinnedMonthTooltipCardV75 = card;
+    }
+
+    markMonthTooltipCardV75(card, true);
+    positionFloatingMonthTooltipV75(card);
+  }
+
+  function hideFloatingMonthTooltipV75(options = {}) {
+    if (pinnedMonthTooltipCardV75 && !options.force) return;
+    clearTimeout(monthTooltipHideTimerV75);
+    cancelAnimationFrame(monthTooltipRepositionFrameV75);
+    monthTooltipRepositionFrameV75 = 0;
+
+    const tooltip = document.querySelector(".dividend-month-floating-tooltip");
+    if (tooltip) {
+      tooltip.classList.remove("is-visible");
+      tooltip.removeAttribute("data-month-index");
+    }
+
+    if (activeMonthTooltipCardV75) markMonthTooltipCardV75(activeMonthTooltipCardV75, false);
+    if (pinnedMonthTooltipCardV75) markMonthTooltipCardV75(pinnedMonthTooltipCardV75, false);
+    activeMonthTooltipCardV75 = null;
+    pinnedMonthTooltipCardV75 = null;
+  }
+
+  function scheduleHideFloatingMonthTooltipV75(card) {
+    if (pinnedMonthTooltipCardV75) return;
+    clearTimeout(monthTooltipHideTimerV75);
+    monthTooltipHideTimerV75 = setTimeout(() => {
+      if (activeMonthTooltipCardV75 === card) hideFloatingMonthTooltipV75({ force: true });
+    }, 160);
+  }
+
   function clearPinnedMonthTooltipsV75(root = document) {
     root.querySelectorAll(".dividend-month-card.is-pinned").forEach((card) => {
       card.classList.remove("is-pinned");
       card.setAttribute("aria-expanded", "false");
     });
+    hideFloatingMonthTooltipV75({ force: true });
   }
 
   function bindDividendMonthTooltipsV75(target) {
@@ -202,33 +322,42 @@
       document.__wealthtrackDividendMonthDismissV75 = true;
       document.addEventListener("click", (event) => {
         if (event.target.closest("#entryQuickStats .dividend-month-card")) return;
+        if (event.target.closest(".dividend-month-floating-tooltip")) return;
         clearPinnedMonthTooltipsV75();
       });
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") clearPinnedMonthTooltipsV75();
       });
+      window.addEventListener("resize", scheduleMonthTooltipPositionV75, { passive: true });
+      window.addEventListener("scroll", scheduleMonthTooltipPositionV75, { passive: true, capture: true });
     }
 
     target.querySelectorAll(".dividend-month-card").forEach((card) => {
       if (card.__wealthtrackDividendMonthTooltipV75) return;
       card.__wealthtrackDividendMonthTooltipV75 = true;
       card.setAttribute("aria-expanded", "false");
-      card.querySelector(".dividend-month-tooltip")?.addEventListener("click", (event) => {
-        event.stopPropagation();
+      card.addEventListener("mouseenter", () => {
+        if (!pinnedMonthTooltipCardV75) showFloatingMonthTooltipV75(card);
       });
+      card.addEventListener("mouseleave", () => scheduleHideFloatingMonthTooltipV75(card));
+      card.addEventListener("focusin", () => {
+        if (!pinnedMonthTooltipCardV75) showFloatingMonthTooltipV75(card);
+      });
+      card.addEventListener("focusout", () => scheduleHideFloatingMonthTooltipV75(card));
       card.addEventListener("click", (event) => {
         if (event.target.closest(".dividend-month-tooltip")) return;
         event.stopPropagation();
-        const shouldPin = !card.classList.contains("is-pinned");
+        const shouldPin = pinnedMonthTooltipCardV75 !== card;
         clearPinnedMonthTooltipsV75(target);
         if (shouldPin) {
-          card.classList.add("is-pinned");
-          card.setAttribute("aria-expanded", "true");
+          showFloatingMonthTooltipV75(card, { pin: true });
           try {
             card.focus({ preventScroll: true });
           } catch (error) {
             card.focus();
           }
+        } else {
+          hideFloatingMonthTooltipV75({ force: true });
         }
       });
       card.addEventListener("keydown", (event) => {
@@ -517,7 +646,7 @@
         const ratio = maxMonth > 0 ? (value / maxMonth) * 100 : 0;
         const payers = summary.monthPayers?.[index] || [];
         return `
-          <div class="dividend-month-card ${value > 0 ? "has-dividend" : ""}" tabindex="0" role="button" aria-label="${MONTH_LABELS[index]}配息 ${value > 0 ? formatWholeSensitiveCurrency(value) : "無"}">
+          <div class="dividend-month-card ${value > 0 ? "has-dividend" : ""}" data-month-index="${index}" tabindex="0" role="button" aria-label="${MONTH_LABELS[index]}配息 ${value > 0 ? formatWholeSensitiveCurrency(value) : "無"}">
             <span>${MONTH_LABELS[index]}</span>
             <strong class="${sensitiveClass(value)}">${value > 0 ? formatWholeSensitiveCurrency(value) : "--"}</strong>
             <span class="dividend-month-bar"><span style="width:${ratio.toFixed(1)}%"></span></span>
