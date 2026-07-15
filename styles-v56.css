@@ -1291,21 +1291,6 @@ select:focus {
   color: var(--text);
 }
 
-#growthChange {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  line-height: 1.25;
-}
-
-#growthChange > span {
-  white-space: nowrap;
-}
-
 .chart-wrap {
   width: 100%;
   max-width: 100%;
@@ -1552,7 +1537,7 @@ select:focus {
 
 table {
   width: 100%;
-  min-width: 1120px;
+  min-width: 1280px;
   border-collapse: collapse;
 }
 
