@@ -231,7 +231,7 @@
       ctx.font = "700 15px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("暫無歷史資料", width / 2, height / 2);
-      if (dom.growthChange) dom.growthChange.textContent = "--";
+      renderGrowthChange(NaN, NaN);
       return;
     }
 
@@ -324,10 +324,7 @@
     const lastValue = convertCurrency(points[points.length - 1].valueTwd, "TWD", state.baseCurrency);
     const change = lastValue - firstValue;
     const changePercent = firstValue > 0 ? (change / firstValue) * 100 : NaN;
-    if (dom.growthChange) {
-      dom.growthChange.textContent = `${formatSensitiveCurrency(change)} ${formatPercent(changePercent)}`;
-      dom.growthChange.className = sensitiveClass(change) || valueClass(change);
-    }
+    renderGrowthChange(change, changePercent);
 
     ctx.fillStyle = muted;
     ctx.font = "700 11px system-ui, sans-serif";
