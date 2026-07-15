@@ -43,19 +43,20 @@
 }
 
 .dividend-month-card:hover,
-.dividend-month-card:focus-within {
+.dividend-month-card:focus-within,
+.dividend-month-card.is-pinned {
   z-index: 35;
 }
 
 .dividend-month-tooltip {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: 100%;
   left: 0;
   z-index: 80;
-  width: min(320px, calc(100vw - 40px));
-  max-height: 320px;
+  width: min(520px, calc(100vw - 48px));
+  max-height: min(560px, calc(100vh - 120px));
   overflow: auto;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 94%, black);
@@ -72,6 +73,12 @@
   z-index: 2;
 }
 
+.dividend-month-card:hover,
+.dividend-month-card:focus-within,
+.dividend-month-card.is-pinned {
+  z-index: 35;
+}
+
 .dividend-month-card:nth-child(6n) .dividend-month-tooltip,
 .dividend-month-card:nth-child(6n-1) .dividend-month-tooltip {
   right: 0;
@@ -79,7 +86,8 @@
 }
 
 .dividend-month-card:hover .dividend-month-tooltip,
-.dividend-month-card:focus-within .dividend-month-tooltip {
+.dividend-month-card:focus-within .dividend-month-tooltip,
+.dividend-month-card.is-pinned .dividend-month-tooltip {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -94,7 +102,7 @@
 }
 
 .dividend-month-tooltip-title {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   padding-bottom: 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
   font-size: 0.86rem;
@@ -109,7 +117,8 @@
 
 .dividend-month-tooltip-list {
   display: grid;
-  gap: 7px;
+  gap: 6px;
+  padding-top: 8px;
 }
 
 .dividend-month-tooltip-row span {
@@ -123,6 +132,12 @@
 .dividend-month-tooltip small {
   color: var(--muted);
   font-weight: 800;
+}
+
+.dividend-month-tooltip-hint {
+  display: block;
+  padding-bottom: 4px;
+  font-size: 0.72rem;
 }
 
 .dividend-payer-header .dividend-sort-header:hover,
@@ -174,8 +189,8 @@
   }
 
   .dividend-month-tooltip {
-    width: min(300px, calc(100vw - 36px));
-    max-height: 260px;
+    width: min(340px, calc(100vw - 32px));
+    max-height: min(460px, calc(100vh - 120px));
   }
 
   .dividend-month-card:nth-child(2n) .dividend-month-tooltip {
