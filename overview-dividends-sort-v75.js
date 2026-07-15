@@ -1,5 +1,5 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v84";
+  const PATCH_KEY = "wealthtrack.dividendSort.v85";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
 
@@ -22,14 +22,14 @@
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=84")) {
-        existing.href = "overview-dividends-sort-v75.css?v=84";
+      if (!String(existing.getAttribute("href") || "").includes("v=85")) {
+        existing.href = "overview-dividends-sort-v75.css?v=85";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=84";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=85";
     document.head.appendChild(stylesheet);
   }
 
@@ -200,6 +200,7 @@
 
   function calculateDividendSummaryV75(rows) {
     const monthTotals = Array(12).fill(0);
+    const monthPayers = Array.from({ length: 12 }, () => []);
     const payers = [];
     let readyCount = 0;
     let missingCount = 0;
@@ -224,6 +225,11 @@
         const converted = convertCurrency(amount, currency, state.baseCurrency);
         if (!Number.isFinite(converted)) continue;
         monthTotals[index] += converted;
+        monthPayers[index].push({
+          symbol: row.position.symbol,
+          value: converted,
+          yieldPercent: Number(profile.yieldPercent) * taxFactor
+        });
         annualValue += converted;
       }
 
@@ -249,9 +255,11 @@
     payers.forEach((payer) => {
       payer.dividendShare = annualTotal > 0 ? (payer.annualValue / annualTotal) * 100 : NaN;
     });
+    monthPayers.forEach((items) => items.sort((a, b) => b.value - a.value || `${a.symbol}`.localeCompare(`${b.symbol}`, "zh-Hant-u-kn-true")));
 
     return {
       monthTotals,
+      monthPayers,
       annualTotal,
       monthAverage: annualTotal / 12,
       readyCount,
@@ -264,6 +272,28 @@
     if (!Array.isArray(months) || !months.length) return "尚無配息月份";
     if (months.length >= 12) return "每月";
     return months.map((monthIndex) => MONTH_LABELS[monthIndex]).join("、");
+  }
+
+  function renderMonthTooltipV75(monthIndex, payers, totalValue) {
+    const safePayers = Array.isArray(payers) ? payers : [];
+    const rows = safePayers
+      .map((payer) => `
+        <div class="dividend-month-tooltip-row">
+          <span>${escapeHtml(payer.symbol)}</span>
+          <strong class="${sensitiveClass(payer.value)}">${formatWholeSensitiveCurrency(payer.value)}</strong>
+        </div>
+      `)
+      .join("");
+
+    return `
+      <div class="dividend-month-tooltip" role="tooltip">
+        <div class="dividend-month-tooltip-title">
+          <span>${MONTH_LABELS[monthIndex]}配息</span>
+          <strong class="${sensitiveClass(totalValue)}">${totalValue > 0 ? formatWholeSensitiveCurrency(totalValue) : "--"}</strong>
+        </div>
+        ${rows ? `<div class="dividend-month-tooltip-list">${rows}</div>` : `<small>這個月暫無配息標的</small>`}
+      </div>
+    `;
   }
 
   function renderEntryQuickStatsV75(scrollTopBeforeRender = getCurrentDividendScrollTopV75(), options = {}) {
@@ -290,11 +320,13 @@
     const monthCards = summary.monthTotals
       .map((value, index) => {
         const ratio = maxMonth > 0 ? (value / maxMonth) * 100 : 0;
+        const payers = summary.monthPayers?.[index] || [];
         return `
-          <div class="dividend-month-card ${value > 0 ? "has-dividend" : ""}">
+          <div class="dividend-month-card ${value > 0 ? "has-dividend" : ""}" tabindex="0" aria-label="${MONTH_LABELS[index]}配息 ${value > 0 ? formatWholeSensitiveCurrency(value) : "無"}">
             <span>${MONTH_LABELS[index]}</span>
             <strong class="${sensitiveClass(value)}">${value > 0 ? formatWholeSensitiveCurrency(value) : "--"}</strong>
             <span class="dividend-month-bar"><span style="width:${ratio.toFixed(1)}%"></span></span>
+            ${renderMonthTooltipV75(index, payers, value)}
           </div>
         `;
       })
