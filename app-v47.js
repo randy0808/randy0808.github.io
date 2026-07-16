@@ -741,6 +741,17 @@ function sensitiveClass(value) {
   return state.ui.privacyMask && Number.isFinite(value) ? "privacy-mask" : valueClass(value);
 }
 
+function sensitiveNumberClass(value) {
+  const numericValue = Number(value);
+  return state.ui.privacyMask && Number.isFinite(numericValue) ? "privacy-mask privacy-mask-number" : valueClass(numericValue);
+}
+
+function formatSensitiveNumber(value, maximumFractionDigits = 6) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "--";
+  return state.ui.privacyMask ? "****" : formatNumber(numericValue, maximumFractionDigits);
+}
+
 function formatCompactCurrency(value, currency = state.baseCurrency) {
   if (!Number.isFinite(value)) return "--";
   if (state.ui.privacyMask) return privateCurrencyLabel(currency);
@@ -1971,8 +1982,8 @@ function renderCell(columnId, position, metrics) {
   const change = Number(quote?.changePercent);
   const quotePriceClass = valueClass(quotePriceDisplay.value);
   const changeClass = valueClass(change);
-  const quantityClass = valueClass(position.quantity);
-  const averageCostClass = valueClass(averageCostDisplay.value);
+  const quantityClass = sensitiveNumberClass(position.quantity);
+  const averageCostClass = sensitiveNumberClass(averageCostDisplay.value);
   const costValueClass = sensitiveClass(metrics.costValue);
   const currentValueClass = sensitiveClass(metrics.currentValue);
   const profitAmountClass = sensitiveClass(metrics.profit);
@@ -2005,13 +2016,13 @@ function renderCell(columnId, position, metrics) {
   }
 
   if (columnId === "quantity") {
-    return `<td class="${quantityClass}">${formatNumber(position.quantity)}</td>`;
+    return `<td class="${quantityClass}">${formatSensitiveNumber(position.quantity)}</td>`;
   }
 
   if (columnId === "averageCost") {
     return `
       <td class="${averageCostClass}">
-        ${formatCurrency(averageCostDisplay.value, averageCostDisplay.currency)}
+        ${formatSensitiveCurrency(averageCostDisplay.value, averageCostDisplay.currency)}
         <div class="sub-value ${costValueClass}">${formatSensitiveCurrency(metrics.costValue)}</div>
       </td>
     `;
@@ -2067,11 +2078,11 @@ function renderRowsLegacy() {
     const change = Number(quote?.changePercent);
     const quotePriceClass = valueClass(quotePriceDisplay.value);
     const changeClass = valueClass(change);
-    const quantityClass = valueClass(position.quantity);
-    const averageCostClass = valueClass(averageCostDisplay.value);
-    const costValueClass = valueClass(metrics.costValue);
-    const currentValueClass = valueClass(metrics.currentValue);
-    const profitClass = valueClass(metrics.profit);
+    const quantityClass = sensitiveNumberClass(position.quantity);
+    const averageCostClass = sensitiveNumberClass(averageCostDisplay.value);
+    const costValueClass = sensitiveClass(metrics.costValue);
+    const currentValueClass = sensitiveClass(metrics.currentValue);
+    const profitClass = sensitiveClass(metrics.profit);
 
     tr.innerHTML = `
       <td>
@@ -2083,10 +2094,10 @@ function renderRowsLegacy() {
           </span>
         </div>
       </td>
-      <td class="${quantityClass}">${formatNumber(position.quantity)}</td>
+      <td class="${quantityClass}">${formatSensitiveNumber(position.quantity)}</td>
       <td class="${averageCostClass}">
-        ${formatCurrency(averageCostDisplay.value, averageCostDisplay.currency)}
-        <div class="sub-value ${costValueClass}">${formatCurrency(metrics.costValue)}</div>
+        ${formatSensitiveCurrency(averageCostDisplay.value, averageCostDisplay.currency)}
+        <div class="sub-value ${costValueClass}">${formatSensitiveCurrency(metrics.costValue)}</div>
       </td>
       <td class="${quotePriceClass}">
         ${Number.isFinite(quotePriceDisplay.value) ? formatCurrency(quotePriceDisplay.value, quotePriceDisplay.currency) : "--"}
@@ -2094,7 +2105,7 @@ function renderRowsLegacy() {
           ${Number.isFinite(change) ? formatPercent(change) : escapeHtml(quote?.source || "等待報價")}
         </div>
       </td>
-      <td class="${currentValueClass}">${formatCurrency(metrics.currentValue)}</td>
+      <td class="${currentValueClass}">${formatSensitiveCurrency(metrics.currentValue)}</td>
       <td class="${profitClass}">${formatWholeSensitiveCurrency(metrics.profit)}</td>
       <td class="${valueClass(metrics.profitPercent)}">${formatPercent(metrics.profitPercent)}</td>
       <td>
