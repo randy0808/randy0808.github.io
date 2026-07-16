@@ -1491,13 +1491,19 @@ function renderYieldAlerts() {
     : `<span class="yield-alert-state">${permission === "granted" ? "系統通知已開啟" : permission === "denied" ? "通知目前被瀏覽器封鎖" : "此瀏覽器不支援系統通知"}</span>`;
 
   panel.innerHTML = `
+    <div class="stock-alert-toolbar">
+      <div class="stock-alert-main">
+        <strong>提醒通知</strong>
+        <span>開啟後，符合提醒條件時會跳出通知</span>
+      </div>
+      <div class="yield-alert-actions">${action}</div>
+    </div>
     <div class="stock-alert-card stock-alert-card-wide">
       <div class="stock-alert-main">
         <strong>股息股提醒</strong>
         <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
       </div>
       <div class="yield-alert-list">${alertItems || `<span class="stock-alert-empty">目前沒有符合條件</span>`}</div>
-      <div class="yield-alert-actions">${action}</div>
     </div>
     <div class="stock-alert-card">
       <div class="stock-alert-main">
