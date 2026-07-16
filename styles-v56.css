@@ -1551,9 +1551,21 @@ select:focus {
   background: color-mix(in srgb, var(--panel-soft) 88%, var(--primary) 8%);
 }
 
+.stock-alert-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 44%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-soft) 86%, var(--primary) 10%);
+}
+
 .stock-alert-card-wide {
   grid-column: 1 / -1;
-  grid-template-columns: minmax(160px, 0.8fr) minmax(260px, 1.8fr) auto;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(260px, 1.8fr);
   align-items: center;
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--primary) 48%, var(--line));
@@ -1919,9 +1931,14 @@ th {
   }
 
   .stock-alert-panel,
+  .stock-alert-toolbar,
   .stock-alert-card-wide {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .stock-alert-toolbar {
+    display: grid;
   }
 
   .yield-alert-actions,
