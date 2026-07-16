@@ -13,8 +13,9 @@ const DIVIDEND_FETCH_DELAY_MS = 350;
 const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
-const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-alert-v96";
-const FUNDAMENTAL_FETCH_DELAY_MS = 350;
+const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v98";
+const FUNDAMENTAL_FETCH_CONCURRENCY = 4;
+const FUNDAMENTAL_FETCH_DELAY_MS = 80;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
 const ASSET_STOCK_PB_THRESHOLD = 0.8;
 const HISTORY_START_DATE = "2026-07-10";
@@ -216,7 +217,11 @@ const state = {
     profiles: {},
     lastSync: null,
     isRefreshing: false,
-    errors: []
+    errors: [],
+    progress: {
+      total: 0,
+      done: 0
+    }
   },
   history: {
     points: [],
@@ -944,8 +949,7 @@ function getAssetStockAlertRows() {
       };
     })
     .filter(({ profile, priceToBook }) =>
-      profile
-      && !profile.error
+      fundamentalProfileCanDisplay(profile)
       && Number.isFinite(priceToBook)
       && priceToBook <= ASSET_STOCK_PB_THRESHOLD
     )
@@ -995,14 +999,68 @@ function getGrowthStockAlertRows() {
       };
     })
     .filter(({ profile, meetsCheapPe, meetsGrowthValue }) =>
-      profile
-      && !profile.error
+      fundamentalProfileCanDisplay(profile)
       && (meetsCheapPe || meetsGrowthValue)
     )
     .sort((a, b) => {
       if (a.meetsCheapPe !== b.meetsCheapPe) return a.meetsCheapPe ? -1 : 1;
       return firstFiniteNumber(a.peRatio, 999) - firstFiniteNumber(b.peRatio, 999);
     });
+}
+
+function fundamentalProfileCanDisplay(profile) {
+  return Boolean(
+    profile
+    && !profile.error
+    && profile.methodVersion === FUNDAMENTAL_PROFILE_METHOD_VERSION
+  );
+}
+
+function getFundamentalAlertStats(predicate) {
+  const positions = state.positions.filter(predicate);
+  let ready = 0;
+  let errors = 0;
+  positions.forEach((position) => {
+    const profile = state.fundamentals.profiles[fundamentalKey(position)];
+    if (fundamentalProfileCanDisplay(profile)) {
+      ready += 1;
+    } else if (profile?.error && profile.methodVersion === FUNDAMENTAL_PROFILE_METHOD_VERSION) {
+      errors += 1;
+    }
+  });
+  return {
+    total: positions.length,
+    ready,
+    errors,
+    missing: Math.max(0, positions.length - ready - errors)
+  };
+}
+
+function formatFundamentalAlertStatus(stats, idleText = "等待更新") {
+  const progress = state.fundamentals.progress || {};
+  if (state.fundamentals.isRefreshing) {
+    const total = Math.max(Number(progress.total) || 0, stats.total);
+    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
+    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
+    return `檢查中 ${done}/${total}${errorText}`;
+  }
+  if (!stats.total) return "沒有需要檢查的個股";
+  if (state.fundamentals.lastSync) {
+    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
+    return `已檢查 ${stats.ready}/${stats.total}${errorText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
+  }
+  return idleText;
+}
+
+function formatFundamentalEmptyText(stats, loadingText) {
+  const progress = state.fundamentals.progress || {};
+  if (state.fundamentals.isRefreshing) {
+    const total = Math.max(Number(progress.total) || 0, stats.total);
+    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
+    return `${loadingText} ${done}/${total}`;
+  }
+  if (stats.ready || stats.errors) return "已檢查，目前沒有符合條件";
+  return "等待財務資料更新";
 }
 
 function calculatePortfolio() {
@@ -1456,6 +1514,8 @@ function renderYieldAlerts() {
   const alerts = getYieldAlertRows();
   const growthAlerts = getGrowthStockAlertRows();
   const assetStockAlerts = getAssetStockAlertRows();
+  const growthStats = getFundamentalAlertStats(isGrowthStockAlertCandidate);
+  const assetStockStats = getFundamentalAlertStats(isAssetStockAlertCandidate);
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
@@ -1483,11 +1543,8 @@ function renderYieldAlerts() {
       <span>P/B ${formatNumber(priceToBook, 2)}</span>
     </span>
   `).join("");
-  const fundamentalStatus = state.fundamentals.isRefreshing
-    ? "正在更新財務資料"
-    : state.fundamentals.lastSync
-      ? `更新 ${formatTime(state.fundamentals.lastSync)}`
-      : "尚未更新";
+  const growthStatus = formatFundamentalAlertStatus(growthStats, "等待檢查成長股");
+  const assetStockStatus = formatFundamentalAlertStatus(assetStockStats, "等待檢查每股帳面價值");
   const action = permission === "default"
     ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
     : `<span class="yield-alert-state">${permission === "granted" ? "通知已開啟" : permission === "denied" ? "通知被瀏覽器封鎖" : "此瀏覽器不支援通知"}</span>`;
@@ -1504,16 +1561,16 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>非銀行股，PE <= ${GROWTH_PE_THRESHOLD}，或股價低於保守 EPS 成長合理價</span>
+        <span>非銀行股，PE <= ${GROWTH_PE_THRESHOLD}，或股價低於保守 EPS 成長合理價；${growthStatus}</span>
       </div>
-      <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在更新財務資料" : "目前沒有符合條件"}</span>`}</div>
+      <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(growthStats, "正在更新財務資料")}</span>`}</div>
     </div>
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，${fundamentalStatus}</span>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}；${assetStockStatus}</span>
       </div>
-      <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在檢查每股帳面價值" : "目前沒有符合條件"}</span>`}</div>
+      <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(assetStockStats, "正在檢查每股帳面價值")}</span>`}</div>
     </div>
   `;
   panel.classList.remove("is-hidden");
@@ -2791,10 +2848,23 @@ async function refreshFundamentalProfiles(options = {}) {
 
   state.fundamentals.isRefreshing = true;
   state.fundamentals.errors = [];
+  state.fundamentals.progress = {
+    total: targets.length,
+    done: 0
+  };
   renderYieldAlerts();
 
   try {
-    for (const position of targets) {
+    let lastRenderedAt = 0;
+    const flushProgress = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastRenderedAt < 250) return;
+      lastRenderedAt = now;
+      saveState({ sync: false });
+      renderYieldAlerts();
+    };
+
+    await mapWithConcurrency(targets, FUNDAMENTAL_FETCH_CONCURRENCY, async (position) => {
       const key = fundamentalKey(position);
       try {
         state.fundamentals.profiles[key] = await fetchFundamentalProfile(position);
@@ -2806,18 +2876,24 @@ async function refreshFundamentalProfiles(options = {}) {
           bookValuePerShare: 0,
           priceToBook: null,
           source: "每股帳面價值暫缺",
+          methodVersion: FUNDAMENTAL_PROFILE_METHOD_VERSION,
           asOf: Date.now(),
           error: true,
           errorMessage: error.message || "無法取得每股帳面價值"
         };
       }
-      saveState({ sync: false });
-      renderYieldAlerts();
+      state.fundamentals.progress.done += 1;
+      flushProgress();
       await sleep(FUNDAMENTAL_FETCH_DELAY_MS);
-    }
+    });
+    flushProgress(true);
     state.fundamentals.lastSync = Date.now();
   } finally {
     state.fundamentals.isRefreshing = false;
+    state.fundamentals.progress = {
+      total: 0,
+      done: 0
+    };
     saveState({ sync: false });
     render();
   }
