@@ -1,6 +1,6 @@
 .dashboard-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 0 0 14px;
 }
@@ -44,6 +44,10 @@
   margin-bottom: 0;
 }
 
+#watchlistTabPanel .stock-alert-panel {
+  margin: 0;
+}
+
 @media (max-width: 680px) {
   .dashboard-tabs {
     position: sticky;
@@ -59,5 +63,17 @@
   .dashboard-tab {
     min-height: 44px;
     font-size: 1rem;
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .dashboard-tabs {
+    gap: 6px;
+  }
+
+  .dashboard-tab {
+    font-size: 0.92rem;
+    padding-inline: 4px;
   }
 }

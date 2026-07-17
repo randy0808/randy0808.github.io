@@ -1604,15 +1604,27 @@ function yieldAlertKey(row) {
 
 function ensureYieldAlertPanel() {
   let panel = document.querySelector("#yieldAlertPanel");
-  if (panel) return panel;
+  const watchlistTabPanel = document.querySelector("#watchlistTabPanel");
+  if (panel) {
+    if (watchlistTabPanel && panel.parentElement !== watchlistTabPanel) {
+      watchlistTabPanel.append(panel);
+    }
+    return panel;
+  }
+
+  panel = document.createElement("div");
+  panel.id = "yieldAlertPanel";
+  panel.className = "stock-alert-panel is-hidden";
+
+  if (watchlistTabPanel) {
+    watchlistTabPanel.append(panel);
+    return panel;
+  }
 
   const holdingsPanel = document.querySelector(".holdings-panel");
   const tableWrap = holdingsPanel?.querySelector(".table-wrap");
   if (!holdingsPanel || !tableWrap) return null;
 
-  panel = document.createElement("div");
-  panel.id = "yieldAlertPanel";
-  panel.className = "stock-alert-panel is-hidden";
   holdingsPanel.insertBefore(panel, tableWrap);
   return panel;
 }
