@@ -13,11 +13,13 @@ const DIVIDEND_FETCH_DELAY_MS = 350;
 const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
-const FUNDAMENTAL_PARTIAL_CACHE_MS = 5 * 60 * 1000;
 const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v105";
-const FUNDAMENTAL_FETCH_CONCURRENCY = 2;
-const FUNDAMENTAL_FETCH_DELAY_MS = 350;
+const FUNDAMENTAL_FETCH_CONCURRENCY = 1;
+const FUNDAMENTAL_FETCH_DELAY_MS = 3_000;
 const FUNDAMENTAL_FETCH_RETRY_DELAY_MS = 700;
+const FUNDAMENTAL_BATCH_RETRY_DELAY_MS = 5_000;
+const FUNDAMENTAL_BATCH_RETRY_ROUNDS = 2;
+const FUNDAMENTAL_ERROR_RETRY_MS = 90_000;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
 const MORNINGSTAR_KEY_METRICS_VERSION = "3.23.12";
 const MORNINGSTAR_READER_BASE = "https://r.jina.ai/http://www.morningstar.com";
@@ -1688,7 +1690,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；基本面優先讀取 Morningstar 10 年原始資料，SEC／Yahoo 僅備援；${growthStatus}</span>
+        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；基本面優先讀取 Morningstar 10 年原始資料，SEC／Yahoo 僅備援；暫時失敗只重試待補檔，不重抓已完成檔；${growthStatus}</span>
       </div>
       <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(growthStats, "正在更新財務資料")}</span>`}</div>
       ${growthMissingList}
@@ -1696,7 +1698,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；基本面優先讀取 Morningstar，SEC／Yahoo 僅備援；${assetStockStatus}</span>
+        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；基本面優先讀取 Morningstar，SEC／Yahoo 僅備援；暫時失敗只重試待補檔；${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(assetStockStats, "正在檢查每股帳面價值")}</span>`}</div>
       ${assetStockMissingList}
@@ -2962,8 +2964,8 @@ function fundamentalKey(position) {
 function fundamentalProfileIsFresh(profile) {
   if (!profile || profile.error) return false;
   if (profile.methodVersion !== FUNDAMENTAL_PROFILE_METHOD_VERSION) return false;
-  const maxAge = profile.bookError || profile.epsError ? FUNDAMENTAL_PARTIAL_CACHE_MS : FUNDAMENTAL_CACHE_MS;
-  return profile?.asOf && Date.now() - Number(profile.asOf) < maxAge;
+  if (profile.bookError || profile.epsError) return false;
+  return profile?.asOf && Date.now() - Number(profile.asOf) < FUNDAMENTAL_CACHE_MS;
 }
 
 function getFundamentalTargets({ force = false } = {}) {
@@ -2996,12 +2998,11 @@ async function refreshFundamentalProfiles(options = {}) {
       renderYieldAlerts();
     };
 
-    await mapWithConcurrency(targets, FUNDAMENTAL_FETCH_CONCURRENCY, async (position) => {
+    const updateTarget = async (position, countProgress = false) => {
       const key = fundamentalKey(position);
       try {
         state.fundamentals.profiles[key] = await fetchFundamentalProfile(position);
       } catch (error) {
-        state.fundamentals.errors.push(position.symbol);
         state.fundamentals.profiles[key] = {
           symbol: position.symbol,
           currency: position.kind === "tw-stock" ? "TWD" : "USD",
@@ -3014,10 +3015,20 @@ async function refreshFundamentalProfiles(options = {}) {
           errorMessage: error.message || "無法取得每股帳面價值"
         };
       }
-      state.fundamentals.progress.done += 1;
+      if (countProgress) state.fundamentals.progress.done += 1;
       flushProgress();
       await sleep(FUNDAMENTAL_FETCH_DELAY_MS);
-    });
+    };
+
+    await mapWithConcurrency(targets, FUNDAMENTAL_FETCH_CONCURRENCY, (position) => updateTarget(position, true));
+    let failedTargets = targets.filter((position) => state.fundamentals.profiles[fundamentalKey(position)]?.error);
+    for (let round = 0; round < FUNDAMENTAL_BATCH_RETRY_ROUNDS && failedTargets.length; round += 1) {
+      await sleep(FUNDAMENTAL_BATCH_RETRY_DELAY_MS * (round + 1));
+      await mapWithConcurrency(failedTargets, 1, (position) => updateTarget(position, false));
+      failedTargets = failedTargets.filter((position) => state.fundamentals.profiles[fundamentalKey(position)]?.error);
+      flushProgress(true);
+    }
+    state.fundamentals.errors = failedTargets.map((position) => position.symbol);
     flushProgress(true);
     state.fundamentals.lastSync = Date.now();
   } finally {
@@ -3175,10 +3186,15 @@ async function fetchMorningstarFundamentalProfile(position) {
     const attempts = targetIndex === 0 ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        const configText = await fetchText(`${MORNINGSTAR_READER_BASE}/api/v2/stocks/${target.market}/${target.symbol}/key-metrics?refresh=${Date.now()}-${attempt}`, {
-          timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
+        const configText = await fetchText(`${MORNINGSTAR_READER_BASE}/api/v2/stocks/${target.market}/${target.symbol}/key-metrics`, {
+          timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS,
+          headers: attempt > 0 ? { "X-No-Cache": "true" } : {}
         });
         const config = parseJsonFromText(configText);
+        if (Number(config?.code) === 429) {
+          const retryAfter = Math.max(2, Number(config?.retryAfter) || 2);
+          throw new Error(`Morningstar 暫時限流，${retryAfter} 秒後自動重試`);
+        }
         const securityId = String(config?.page?.securityID || config?.page?.securityId || "").trim();
         const token = String(config?.components?.maasToken?.payload || "").trim();
         const contentType = String(config?.components?.salContentType?.payload || "").trim();
@@ -3694,7 +3710,7 @@ function handleRefreshClick() {
   if (dom.syncStatus) dom.syncStatus.textContent = "已點擊更新，正在重新同步市場價格...";
   refreshPrices({ force: true, manual: true });
   refreshDividendProfiles();
-  refreshFundamentalProfiles({ force: true });
+  refreshFundamentalProfiles({ force: !getFundamentalTargets().length });
 }
 
 window.wealthtrackManualRefresh = handleRefreshClick;
@@ -3920,12 +3936,13 @@ function inferDividendFrequency(events, position) {
 }
 
 async function fetchText(url, options = {}) {
-  const { timeoutMs = 12_000 } = options;
+  const { timeoutMs = 12_000, headers = {} } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       cache: "no-store",
+      headers,
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -4006,7 +4023,7 @@ function handleSubmit(event) {
     render();
     refreshPrices();
     refreshDividendProfiles();
-    refreshFundamentalProfiles({ force: true });
+    refreshFundamentalProfiles();
   } catch (error) {
     window.alert(error.message || "無法儲存資產");
   }
@@ -5087,3 +5104,7 @@ if (state.positions.length) {
 setInterval(() => {
   if (state.positions.length && document.visibilityState === "visible") refreshPrices();
 }, REFRESH_MS);
+
+setInterval(() => {
+  if (state.positions.length && document.visibilityState === "visible") refreshFundamentalProfiles();
+}, FUNDAMENTAL_ERROR_RETRY_MS);
