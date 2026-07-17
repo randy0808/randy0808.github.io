@@ -13,9 +13,11 @@ const DIVIDEND_FETCH_DELAY_MS = 350;
 const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
-const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v103";
-const FUNDAMENTAL_FETCH_CONCURRENCY = 4;
-const FUNDAMENTAL_FETCH_DELAY_MS = 80;
+const FUNDAMENTAL_PARTIAL_CACHE_MS = 5 * 60 * 1000;
+const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v104";
+const FUNDAMENTAL_FETCH_CONCURRENCY = 2;
+const FUNDAMENTAL_FETCH_DELAY_MS = 350;
+const FUNDAMENTAL_FETCH_RETRY_DELAY_MS = 700;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
 const ASSET_STOCK_PB_THRESHOLD = 0.8;
 const BRK_B_ASSET_STOCK_PB_THRESHOLD = 1.2;
@@ -38,7 +40,6 @@ const DEVICE_SYNC_HASH_PREFIX = "#sync=";
 const YIELD_ALERT_THRESHOLD = 4;
 const GROWTH_PE_THRESHOLD = 12;
 const GROWTH_ALERT_PERIODS = [3, 5, 10];
-const GROWTH_FAIR_PE_CAP = 30;
 const YIELD_ALERT_STORAGE_KEY = "wealthtrack.yieldAlerts.v1";
 
 const SEC_STATIC_CIKS = {
@@ -983,7 +984,7 @@ function getAssetStockMetrics(position) {
   const quotePrice = Number(metrics.quote?.price);
   const quoteCurrency = metrics.quoteCurrency || (position.kind === "tw-stock" ? "TWD" : "USD");
   const bookCurrency = profile?.currency || quoteCurrency;
-  const bookValue = convertCurrency(Number(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
+  const bookValue = convertCurrency(firstFiniteNumber(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
   const computedPriceToBook = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(bookValue) && bookValue > 0
     ? quotePrice / bookValue
     : NaN;
@@ -1011,7 +1012,7 @@ function getAssetStockAlertRows() {
 }
 
 function isGrowthStockAlertCandidate(position) {
-  return isFundamentalAlertCandidate(position) && !isBankStockPosition(position);
+  return isFundamentalAlertCandidate(position);
 }
 
 function getGrowthStockAlertRows() {
@@ -1027,17 +1028,14 @@ function getGrowthStockAlertRows() {
       const peRatio = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(latestEps) && latestEps > 0
         ? quotePrice / latestEps
         : NaN;
-      const conservativeEpsGrowth = Number(profile?.conservativeEpsGrowth);
+      const conservativeEpsGrowth = firstFiniteNumber(profile?.conservativeEpsGrowth);
       const fairPrice = Number.isFinite(latestEps) && latestEps > 0 && Number.isFinite(conservativeEpsGrowth) && conservativeEpsGrowth > 0
         ? latestEps * conservativeEpsGrowth
         : NaN;
       const meetsCheapPe = Number.isFinite(peRatio) && peRatio <= GROWTH_PE_THRESHOLD;
-      const meetsGrowthValue = Number.isFinite(peRatio)
-        && Number.isFinite(conservativeEpsGrowth)
-        && peRatio < conservativeEpsGrowth
-        && Number.isFinite(fairPrice)
+      const meetsGrowthValue = Number.isFinite(fairPrice)
         && Number.isFinite(quotePrice)
-        && quotePrice < fairPrice;
+        && quotePrice <= fairPrice;
       return {
         position,
         metrics,
@@ -1085,30 +1083,79 @@ function fundamentalProfileHasAssetData(position, profile) {
   return priceToBookIsPlausible(getAssetStockMetrics(position).priceToBook);
 }
 
-function getFundamentalAlertStats(predicate, metricReady) {
+function getGrowthFundamentalCheck(position, profile) {
+  if (!fundamentalProfileCanDisplay(profile)) {
+    return { status: "missing", reason: profile?.errorMessage || "財務資料取得失敗" };
+  }
+  const metrics = calculatePosition(position);
+  const quotePrice = Number(metrics.quote?.price);
+  if (!Number.isFinite(quotePrice) || quotePrice <= 0) {
+    return { status: "missing", reason: "缺少目前股價" };
+  }
+  const quoteCurrency = metrics.quoteCurrency || "USD";
+  const epsCurrency = profile?.currency || quoteCurrency;
+  const latestEps = convertCurrency(firstFiniteNumber(profile?.ttmEps, profile?.latestEps), epsCurrency, quoteCurrency);
+  if (!Number.isFinite(latestEps)) {
+    return { status: "missing", reason: profile?.epsError || "缺少 EPS" };
+  }
+  if (latestEps <= 0) {
+    return { status: "not-applicable", reason: "EPS <= 0，PE 與 EPS 門檻價不適用" };
+  }
+  if (!Number.isFinite(firstFiniteNumber(profile?.conservativeEpsGrowth))) {
+    return { status: "missing", reason: "3／5／10 年 EPS Growth 歷史不足" };
+  }
+  return { status: "ready", reason: "" };
+}
+
+function getAssetFundamentalCheck(position, profile) {
+  if (!fundamentalProfileCanDisplay(profile)) {
+    return { status: "missing", reason: profile?.errorMessage || "財務資料取得失敗" };
+  }
+  const { metrics, bookValue, priceToBook } = getAssetStockMetrics(position);
+  const quotePrice = Number(metrics.quote?.price);
+  if (!Number.isFinite(quotePrice) || quotePrice <= 0) {
+    return { status: "missing", reason: "缺少目前股價" };
+  }
+  if (!Number.isFinite(bookValue)) {
+    return { status: "missing", reason: profile?.bookError || "缺少每股帳面價值" };
+  }
+  if (bookValue <= 0) {
+    return { status: "not-applicable", reason: "每股帳面價值 <= 0，P/B 不適用" };
+  }
+  if (!priceToBookIsPlausible(priceToBook)) {
+    return { status: "missing", reason: "P/B 計算結果異常" };
+  }
+  return { status: "ready", reason: "" };
+}
+
+function getFundamentalAlertStats(predicate, checkMetric) {
   const positions = state.positions.filter(predicate);
   let ready = 0;
-  let errors = 0;
   let missing = 0;
-  const unavailableSymbols = [];
+  let notApplicable = 0;
+  const unavailableItems = [];
+  const notApplicableItems = [];
   positions.forEach((position) => {
     const profile = state.fundamentals.profiles[fundamentalKey(position)];
-    if (metricReady(position, profile)) {
+    const check = checkMetric(position, profile);
+    if (check.status === "ready") {
       ready += 1;
-    } else if (profile?.methodVersion === FUNDAMENTAL_PROFILE_METHOD_VERSION) {
-      errors += 1;
-      unavailableSymbols.push(position.symbol);
+    } else if (check.status === "not-applicable") {
+      notApplicable += 1;
+      notApplicableItems.push({ symbol: position.symbol, reason: check.reason });
     } else {
       missing += 1;
-      unavailableSymbols.push(position.symbol);
+      unavailableItems.push({ symbol: position.symbol, reason: check.reason });
     }
   });
   return {
     total: positions.length,
     ready,
-    errors,
     missing,
-    unavailableSymbols
+    notApplicable,
+    checked: ready + notApplicable,
+    unavailableItems,
+    notApplicableItems
   };
 }
 
@@ -1116,15 +1163,15 @@ function formatFundamentalAlertStatus(stats, idleText = "等待更新") {
   const progress = state.fundamentals.progress || {};
   if (state.fundamentals.isRefreshing) {
     const total = Math.max(Number(progress.total) || 0, stats.total);
-    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
-    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
+    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.checked));
+    const errorText = stats.missing ? `，${stats.missing} 檔待補` : "";
     return `檢查中 ${done}/${total}${errorText}`;
   }
   if (!stats.total) return "沒有需要檢查的個股";
   if (state.fundamentals.lastSync) {
-    const unavailable = stats.errors + stats.missing;
-    const errorText = unavailable ? `，${unavailable} 檔缺資料` : "";
-    return `已檢查 ${stats.ready}/${stats.total}${errorText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
+    const missingText = stats.missing ? `，${stats.missing} 檔待補` : "";
+    const notApplicableText = stats.notApplicable ? `，${stats.notApplicable} 檔不適用` : "";
+    return `已檢查 ${stats.checked}/${stats.total}${missingText}${notApplicableText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
   }
   return idleText;
 }
@@ -1133,24 +1180,31 @@ function formatFundamentalEmptyText(stats, loadingText) {
   const progress = state.fundamentals.progress || {};
   if (state.fundamentals.isRefreshing) {
     const total = Math.max(Number(progress.total) || 0, stats.total);
-    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
+    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.checked));
     return `${loadingText} ${done}/${total}`;
   }
-  if (stats.ready || stats.errors || (state.fundamentals.lastSync && stats.missing)) {
+  if (stats.checked || (state.fundamentals.lastSync && stats.missing)) {
     return "已檢查，目前沒有符合條件";
   }
   return "等待財務資料更新";
 }
 
 function renderFundamentalMissingList(stats, label) {
-  if (state.fundamentals.isRefreshing || !state.fundamentals.lastSync || !stats.unavailableSymbols.length) return "";
-  const symbols = stats.unavailableSymbols.map((symbol) => escapeHtml(symbol)).join("、");
-  return `
-    <div class="stock-alert-missing">
-      <strong>${escapeHtml(label)}缺資料</strong>
-      <span>${symbols}</span>
-    </div>
-  `;
+  if (state.fundamentals.isRefreshing || !state.fundamentals.lastSync) return "";
+  const blocks = [];
+  if (stats.unavailableItems.length) {
+    const items = stats.unavailableItems
+      .map(({ symbol, reason }) => `${escapeHtml(symbol)}（${escapeHtml(reason)}）`)
+      .join("、");
+    blocks.push(`<div class="stock-alert-missing"><strong>${escapeHtml(label)}待補資料</strong><span>${items}</span></div>`);
+  }
+  if (stats.notApplicableItems.length) {
+    const items = stats.notApplicableItems
+      .map(({ symbol, reason }) => `${escapeHtml(symbol)}（${escapeHtml(reason)}）`)
+      .join("、");
+    blocks.push(`<div class="stock-alert-missing"><strong>${escapeHtml(label)}已檢查但不適用</strong><span>${items}</span></div>`);
+  }
+  return blocks.join("");
 }
 
 function calculatePortfolio() {
@@ -1545,8 +1599,8 @@ function renderYieldAlerts() {
   const alerts = getYieldAlertRows();
   const growthAlerts = getGrowthStockAlertRows();
   const assetStockAlerts = getAssetStockAlertRows();
-  const growthStats = getFundamentalAlertStats(isGrowthStockAlertCandidate, fundamentalProfileHasGrowthData);
-  const assetStockStats = getFundamentalAlertStats(isAssetStockAlertCandidate, fundamentalProfileHasAssetData);
+  const growthStats = getFundamentalAlertStats(isGrowthStockAlertCandidate, getGrowthFundamentalCheck);
+  const assetStockStats = getFundamentalAlertStats(isAssetStockAlertCandidate, getAssetFundamentalCheck);
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
@@ -1555,12 +1609,15 @@ function renderYieldAlerts() {
     </span>
   `).join("");
   const growthItems = growthAlerts.map((row) => {
+    const averageText = GROWTH_ALERT_PERIODS
+      .map((period) => `${period}年 ${formatPlainPercent(row.profile?.epsGrowthAverages?.[period], 1)}`)
+      .join("／");
     const growthText = Number.isFinite(row.conservativeEpsGrowth)
-      ? `<span>保守 CAGR ${formatPlainPercent(row.conservativeEpsGrowth, 1)}</span>`
+      ? `<span>平均 Growth：${averageText}</span><span>保守 Growth ${formatPlainPercent(row.conservativeEpsGrowth, 1)}</span>`
       : "";
-    const reasonText = row.meetsCheapPe ? "PE便宜" : "低於合理價";
+    const reasonText = row.meetsCheapPe ? "PE <= 12" : "低於 EPS 門檻價";
     const fairPriceText = Number.isFinite(row.fairPrice)
-      ? `<span>估算合理價 ${escapeHtml(row.quoteCurrency)} ${formatNumber(row.fairPrice, 2)}</span>`
+      ? `<span>EPS ${formatNumber(row.latestEps, 2)} × ${formatNumber(row.conservativeEpsGrowth, 1)} = 門檻價 ${escapeHtml(row.quoteCurrency)} ${formatNumber(row.fairPrice, 2)}</span>`
       : "";
     return `
       <span class="yield-alert-chip">
@@ -1604,7 +1661,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>非銀行股，PE <= ${GROWTH_PE_THRESHOLD}，或 PE 低於保守 EPS CAGR（合理 PE 上限 ${GROWTH_FAIR_PE_CAP}）；${growthStatus}</span>
+        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；${growthStatus}</span>
       </div>
       <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(growthStats, "正在更新財務資料")}</span>`}</div>
       ${growthMissingList}
@@ -2821,7 +2878,9 @@ async function fetchTwseQuote(symbol) {
 
 function firstFiniteNumber(...values) {
   for (const value of values) {
-    const number = Number(String(value ?? "").replaceAll(",", ""));
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    const number = Number(String(value).replaceAll(",", ""));
     if (Number.isFinite(number)) return number;
   }
   return NaN;
@@ -2876,7 +2935,8 @@ function fundamentalKey(position) {
 function fundamentalProfileIsFresh(profile) {
   if (!profile || profile.error) return false;
   if (profile.methodVersion !== FUNDAMENTAL_PROFILE_METHOD_VERSION) return false;
-  return profile?.asOf && Date.now() - Number(profile.asOf) < FUNDAMENTAL_CACHE_MS;
+  const maxAge = profile.bookError || profile.epsError ? FUNDAMENTAL_PARTIAL_CACHE_MS : FUNDAMENTAL_CACHE_MS;
+  return profile?.asOf && Date.now() - Number(profile.asOf) < maxAge;
 }
 
 function getFundamentalTargets({ force = false } = {}) {
@@ -2958,7 +3018,7 @@ async function fetchSecBookValueProfile(position) {
     const cik = await findSecCik(position.marketSymbol || position.symbol);
     if (!cik) throw new Error("SEC CIK not found");
     const padded = String(cik).padStart(10, "0");
-    facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, {
+    facts = await fetchFundamentalJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, {
       fallbackProxy: true,
       timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
     });
@@ -2968,8 +3028,7 @@ async function fetchSecBookValueProfile(position) {
 
   const gaap = facts?.facts?.["us-gaap"] || {};
   const dei = facts?.facts?.dei || {};
-  const equity = facts ? firstFiniteNumber(
-    latestFactValue(gaap, [
+  const reportedEquity = facts ? latestFactValue(gaap, [
       "StockholdersEquity",
       "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
       "StockholdersEquityAttributableToParent",
@@ -2977,9 +3036,11 @@ async function fetchSecBookValueProfile(position) {
       "TotalEquity",
       "AssetsNet",
       "PartnersCapital"
-    ], (unit) => unit === "USD"),
-    latestFactValue(gaap, ["Assets"], (unit) => unit === "USD") - latestFactValue(gaap, ["Liabilities"], (unit) => unit === "USD")
-  ) : NaN;
+    ], (unit) => unit === "USD") : NaN;
+  const assets = facts ? firstFiniteNumber(latestFactValue(gaap, ["Assets"], (unit) => unit === "USD")) : NaN;
+  const liabilities = facts ? firstFiniteNumber(latestFactValue(gaap, ["Liabilities"], (unit) => unit === "USD")) : NaN;
+  const balanceSheetEquity = Number.isFinite(assets) && Number.isFinite(liabilities) ? assets - liabilities : NaN;
+  const equity = firstFiniteNumber(reportedEquity, balanceSheetEquity);
   const shares = facts ? firstFiniteNumber(
     latestFactValue(dei, ["EntityCommonStockSharesOutstanding"], (unit) => unit.toLowerCase().includes("shares")),
     latestFactValue(gaap, [
@@ -3004,19 +3065,19 @@ async function fetchSecBookValueProfile(position) {
     yahooError = error;
   }
   const epsProfile = buildEpsGrowthProfile(
-    mergeEpsRows(secEpsRows, yahooEpsProfile.epsRows),
+    mergeEpsRows(yahooEpsProfile.epsRows, secEpsRows),
     yahooEpsProfile.ttmEps
   );
-  const secBookValuePerShare = Number.isFinite(equity) && equity > 0 && Number.isFinite(shares) && shares > 0
+  const secBookValuePerShare = Number.isFinite(equity) && Number.isFinite(shares) && shares > 0
     ? equity / shares
     : NaN;
   const yahooBookValuePerShare = Number(yahooEpsProfile.bookValuePerShare);
   const bookValuePerShare = isBerkshireClassB(position)
     ? firstFiniteNumber(yahooBookValuePerShare, secBookValuePerShare)
     : firstFiniteNumber(secBookValuePerShare, yahooBookValuePerShare);
-  const hasBookValue = Number.isFinite(bookValuePerShare) && bookValuePerShare > 0;
+  const hasBookValue = Number.isFinite(bookValuePerShare);
   const usableEps = firstFiniteNumber(epsProfile.ttmEps, epsProfile.latestEps);
-  const hasGrowthData = Number.isFinite(usableEps) && usableEps > 0;
+  const hasGrowthData = Number.isFinite(usableEps);
 
   if (!hasBookValue && !hasGrowthData) {
     throw new Error(secError?.message || yahooError?.message || "Missing SEC book value and EPS data");
@@ -3087,7 +3148,9 @@ async function fetchYahooEpsProfile(position) {
     "annualDilutedAverageShares"
   ];
   let lastError = null;
-  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
+  const hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
+  for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+    const host = hosts[hostIndex];
     try {
       const url = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?symbol=${encodeURIComponent(symbol)}&type=${types.join(",")}&period1=${start}&period2=${end}`;
       const data = await fetchJson(url, { fallbackProxy: true, timeoutMs: 14_000 });
@@ -3096,6 +3159,7 @@ async function fetchYahooEpsProfile(position) {
       lastError = new Error("Yahoo 財務資料沒有可用欄位");
     } catch (error) {
       lastError = error;
+      if (hostIndex < hosts.length - 1) await sleep(FUNDAMENTAL_FETCH_RETRY_DELAY_MS);
     }
   }
   throw lastError || new Error("Yahoo EPS unavailable");
@@ -3138,7 +3202,7 @@ function parseYahooEpsProfile(data) {
       latestStoredEpsValue(trailing, "trailingDilutedEPS"),
       latestStoredEpsValue(trailing, "trailingBasicEPS")
     ),
-    bookValuePerShare: Number.isFinite(latestEquity) && latestEquity > 0 && Number.isFinite(latestShares) && latestShares > 0
+    bookValuePerShare: Number.isFinite(latestEquity) && Number.isFinite(latestShares) && latestShares > 0
       ? latestEquity / latestShares
       : NaN
   };
@@ -3280,13 +3344,11 @@ function buildEpsGrowthProfile(epsRows, ttmEps = NaN) {
       : NaN;
     return { year, eps, epsGrowth };
   });
-  const latestAnnual = rowsWithGrowth[0]?.eps > 0 ? rowsWithGrowth[0] : null;
   const epsGrowthAverages = Object.fromEntries(GROWTH_ALERT_PERIODS.map((period) => {
-    if (!latestAnnual) return [period, NaN];
-    const earlierEps = Number(epsByYear.get(latestAnnual.year - period));
-    if (!Number.isFinite(earlierEps) || earlierEps <= 0) return [period, NaN];
-    const cagr = (Math.pow(latestAnnual.eps / earlierEps, 1 / period) - 1) * 100;
-    return [period, Number.isFinite(cagr) && cagr > 0 ? Math.min(cagr, GROWTH_FAIR_PE_CAP) : NaN];
+    const recentGrowthValues = rowsWithGrowth
+      .slice(0, period)
+      .map((row) => row.epsGrowth);
+    return [period, averageFinite(recentGrowthValues)];
   }));
   const conservativeGrowthValues = Object.values(epsGrowthAverages).filter(Number.isFinite);
   const ttm = Number(ttmEps);
@@ -3297,9 +3359,22 @@ function buildEpsGrowthProfile(epsRows, ttmEps = NaN) {
     latestEps: firstFiniteNumber(ttm, latestAnnualEps),
     epsGrowthAverages,
     conservativeEpsGrowth: conservativeGrowthValues.length
-      ? Math.min(...conservativeGrowthValues, GROWTH_FAIR_PE_CAP)
+      ? Math.min(...conservativeGrowthValues)
       : NaN
   };
+}
+
+async function fetchFundamentalJson(url, options = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetchJson(url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await sleep(FUNDAMENTAL_FETCH_RETRY_DELAY_MS);
+    }
+  }
+  throw lastError || new Error("財務資料取得失敗");
 }
 
 function averageFinite(values) {
@@ -3675,7 +3750,8 @@ async function fetchJson(url, options = {}) {
   } catch (error) {
     if (!fallbackProxy) throw error;
     try {
-      return parseJsonFromText(await fetchText(`https://r.jina.ai/http://${url}`, { timeoutMs }));
+      const readerTarget = String(url).replace(/^https?:\/\//i, "");
+      return parseJsonFromText(await fetchText(`https://r.jina.ai/http://${readerTarget}`, { timeoutMs }));
     } catch (readerError) {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
       return fetchJsonDirect(proxyUrl, timeoutMs);
