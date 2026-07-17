@@ -781,6 +781,28 @@ function formatPercent(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function renderGrowthChange(change, changePercent) {
+  if (!dom.growthChange) return;
+  if (!Number.isFinite(change)) {
+    dom.growthChange.textContent = "--";
+    dom.growthChange.className = "";
+    dom.growthChange.removeAttribute("aria-label");
+    return;
+  }
+
+  const amountText = formatSensitiveCurrency(change);
+  const percentText = formatPercent(changePercent);
+  const amount = document.createElement("span");
+  const percent = document.createElement("span");
+  amount.className = "growth-change-amount";
+  percent.className = "growth-change-percent";
+  amount.textContent = amountText;
+  percent.textContent = percentText;
+  dom.growthChange.replaceChildren(amount, percent);
+  dom.growthChange.className = sensitiveClass(change) || valueClass(change);
+  dom.growthChange.setAttribute("aria-label", `${amountText} ${percentText}`);
+}
+
 function formatPlainPercent(value, maximumFractionDigits = 1) {
   if (!Number.isFinite(value)) return "--";
   return `${value.toFixed(maximumFractionDigits)}%`;
@@ -1219,7 +1241,7 @@ function drawGrowthChart(totals = calculatePortfolio()) {
     ctx.font = "700 15px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("等待今日資產紀錄", width / 2, height / 2);
-    if (dom.growthChange) dom.growthChange.textContent = "--";
+    renderGrowthChange(NaN, NaN);
     return;
   }
 
@@ -1310,10 +1332,7 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   const lastValue = convertCurrency(points[points.length - 1].valueTwd, "TWD", state.baseCurrency);
   const change = lastValue - firstValue;
   const changePercent = firstValue > 0 ? (change / firstValue) * 100 : NaN;
-  if (dom.growthChange) {
-    dom.growthChange.textContent = `${formatSensitiveCurrency(change)} ${formatPercent(changePercent)}`;
-    dom.growthChange.className = sensitiveClass(change) || valueClass(change);
-  }
+  renderGrowthChange(change, changePercent);
 
   ctx.fillStyle = muted;
   ctx.font = "700 11px system-ui, sans-serif";
