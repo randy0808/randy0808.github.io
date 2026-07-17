@@ -1195,8 +1195,7 @@ function formatFundamentalAlertStatus(stats, idleText = "等待更新") {
   if (!stats.total) return "沒有需要檢查的個股";
   if (state.fundamentals.lastSync) {
     const missingText = stats.missing ? `，${stats.missing} 檔待補` : "";
-    const notApplicableText = stats.notApplicable ? `，${stats.notApplicable} 檔不適用` : "";
-    return `已檢查 ${stats.checked}/${stats.total}${missingText}${notApplicableText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
+    return `已檢查 ${stats.checked}/${stats.total}${missingText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
   }
   return idleText;
 }
@@ -1222,12 +1221,6 @@ function renderFundamentalMissingList(stats, label) {
       .map(({ symbol, reason }) => `${escapeHtml(symbol)}（${escapeHtml(reason)}）`)
       .join("、");
     blocks.push(`<div class="stock-alert-missing"><strong>${escapeHtml(label)}待補資料</strong><span>${items}</span></div>`);
-  }
-  if (stats.notApplicableItems.length) {
-    const items = stats.notApplicableItems
-      .map(({ symbol, reason }) => `${escapeHtml(symbol)}（${escapeHtml(reason)}）`)
-      .join("、");
-    blocks.push(`<div class="stock-alert-missing"><strong>${escapeHtml(label)}已檢查但不適用</strong><span>${items}</span></div>`);
   }
   return blocks.join("");
 }
@@ -1702,7 +1695,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；基本面優先讀取 Morningstar 10 年原始資料，SEC／Yahoo 僅備援；暫時失敗只重試待補檔，不重抓已完成檔；${growthStatus}</span>
+        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；暫時失敗只重試待補檔，不重抓已完成檔；${growthStatus}</span>
       </div>
       <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(growthStats, "正在更新財務資料")}</span>`}</div>
       ${growthMissingList}
@@ -1710,7 +1703,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；基本面優先讀取 Morningstar，SEC／Yahoo 僅備援；暫時失敗只重試待補檔；${assetStockStatus}</span>
+        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；暫時失敗只重試待補檔；${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(assetStockStats, "正在檢查每股帳面價值")}</span>`}</div>
       ${assetStockMissingList}
@@ -2591,12 +2584,15 @@ async function refreshPrices(options = {}) {
 async function fetchFxRates() {
   try {
     const data = await fetchJson("https://open.er-api.com/v6/latest/USD", { fallbackProxy: false });
-    if (!data?.rates?.TWD) throw new Error("Missing TWD rate");
+    if (!data?.rates?.TWD || !data?.rates?.EUR) throw new Error("Missing TWD or EUR rate");
+    const rates = Object.fromEntries(
+      Object.entries(data.rates)
+        .map(([currency, rate]) => [String(currency).toUpperCase(), Number(rate)])
+        .filter(([, rate]) => Number.isFinite(rate) && rate > 0)
+    );
+    rates.USD = 1;
     state.fx = {
-      rates: {
-        USD: 1,
-        TWD: Number(data.rates.TWD)
-      },
+      rates,
       asOf: Date.now(),
       source: "open.er-api.com"
     };
