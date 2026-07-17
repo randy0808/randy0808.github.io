@@ -14,11 +14,14 @@ const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
 const FUNDAMENTAL_PARTIAL_CACHE_MS = 5 * 60 * 1000;
-const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v104";
+const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v105";
 const FUNDAMENTAL_FETCH_CONCURRENCY = 2;
 const FUNDAMENTAL_FETCH_DELAY_MS = 350;
 const FUNDAMENTAL_FETCH_RETRY_DELAY_MS = 700;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
+const MORNINGSTAR_KEY_METRICS_VERSION = "3.23.12";
+const MORNINGSTAR_READER_BASE = "https://r.jina.ai/http://www.morningstar.com";
+const MORNINGSTAR_SAL_BASE = "https://www.us-api.morningstar.com/sal/sal-service";
 const ASSET_STOCK_PB_THRESHOLD = 0.8;
 const BRK_B_ASSET_STOCK_PB_THRESHOLD = 1.2;
 const HISTORY_START_DATE = "2026-07-10";
@@ -154,22 +157,27 @@ const ALLOCATION_CATEGORIES = [
   { kind: "us-stock", label: "美股", color: "#d9472b" },
   { kind: "tw-stock", label: "台股", color: "#4d908e" }
 ];
-const GOOGLE_FINANCE_READER_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
+const GOOGLE_FINANCE_READER_BASE = "https://r.jina.ai/http://www.google.com/finance/quote/";
 const DEFAULT_GOOGLE_US_EXCHANGES = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
 const GOOGLE_FINANCE_EXCHANGE_HINTS = {
   AAPL: "NASDAQ",
   AMD: "NASDAQ",
   AMZN: "NASDAQ",
+  ASML: "NASDAQ",
   COST: "NASDAQ",
+  INTC: "NASDAQ",
+  KHC: "NASDAQ",
   GOOGL: "NASDAQ",
   GOOG: "NASDAQ",
   META: "NASDAQ",
   MSFT: "NASDAQ",
   NFLX: "NASDAQ",
   NVDA: "NASDAQ",
+  PEP: "NASDAQ",
   QQQ: "NASDAQ",
   TQQQ: "NASDAQ",
   TSLA: "NASDAQ",
+  YORW: "NASDAQ",
   VOO: "NYSEARCA",
   SPY: "NYSEARCA",
   IVV: "NYSEARCA",
@@ -184,13 +192,28 @@ const GOOGLE_FINANCE_EXCHANGE_HINTS = {
   CCL: "NYSE",
   DIS: "NYSE",
   EL: "NYSE",
+  GIS: "NYSE",
+  HRL: "NYSE",
   JPM: "NYSE",
+  JNJ: "NYSE",
   KO: "NYSE",
+  MA: "NYSE",
+  MCD: "NYSE",
+  MMM: "NYSE",
   NKE: "NYSE",
+  NOK: "NYSE",
+  O: "NYSE",
+  PG: "NYSE",
+  SBUX: "NASDAQ",
+  T: "NYSE",
   TSM: "NYSE",
   UNH: "NYSE",
   V: "NYSE",
-  WMT: "NYSE"
+  WFC: "NYSE",
+  WMT: "NYSE",
+  WTI: "NYSE",
+  WTRG: "NYSE",
+  XOM: "NYSE"
 };
 
 const state = {
@@ -1619,12 +1642,16 @@ function renderYieldAlerts() {
     const fairPriceText = Number.isFinite(row.fairPrice)
       ? `<span>EPS ${formatNumber(row.latestEps, 2)} × ${formatNumber(row.conservativeEpsGrowth, 1)} = 門檻價 ${escapeHtml(row.quoteCurrency)} ${formatNumber(row.fairPrice, 2)}</span>`
       : "";
+    const negativeEpsWarning = row.profile?.epsRows?.some((item) => Number(item.eps) <= 0)
+      ? `<span>注意：歷史 EPS 曾為負值，轉正年度會放大平均 Growth</span>`
+      : "";
     return `
       <span class="yield-alert-chip">
         <strong>${escapeHtml(row.position.symbol)}</strong>
         <span>PE ${formatNumber(row.peRatio, 1)}</span>
         ${growthText}
         ${fairPriceText}
+        ${negativeEpsWarning}
         <span>${reasonText}</span>
       </span>
     `;
@@ -1661,7 +1688,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；${growthStatus}</span>
+        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；基本面優先讀取 Morningstar 10 年原始資料，SEC／Yahoo 僅備援；${growthStatus}</span>
       </div>
       <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(growthStats, "正在更新財務資料")}</span>`}</div>
       ${growthMissingList}
@@ -1669,7 +1696,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；${assetStockStatus}</span>
+        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；基本面優先讀取 Morningstar，SEC／Yahoo 僅備援；${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(assetStockStats, "正在檢查每股帳面價值")}</span>`}</div>
       ${assetStockMissingList}
@@ -3012,6 +3039,38 @@ async function fetchFundamentalProfile(position) {
 }
 
 async function fetchSecBookValueProfile(position) {
+  let morningstarError = null;
+  let morningstarProfile = null;
+  try {
+    const morningstar = await fetchMorningstarFundamentalProfile(position);
+    const epsProfile = buildEpsGrowthProfile(morningstar.epsRows, morningstar.ttmEps);
+    const usableEps = firstFiniteNumber(epsProfile.ttmEps, epsProfile.latestEps);
+    const hasGrowthData = Number.isFinite(usableEps);
+    const hasBookValue = Number.isFinite(Number(morningstar.bookValuePerShare));
+    morningstarProfile = { ...morningstar, ...epsProfile, hasGrowthData, hasBookValue };
+    if (hasGrowthData && hasBookValue) {
+      return {
+        symbol: position.symbol,
+        currency: morningstar.currency || "USD",
+        methodVersion: FUNDAMENTAL_PROFILE_METHOD_VERSION,
+        bookValuePerShare: hasBookValue ? Number(morningstar.bookValuePerShare) : null,
+        priceToBook: null,
+        epsRows: epsProfile.epsRows,
+        ttmEps: epsProfile.ttmEps,
+        latestEps: epsProfile.latestEps,
+        epsGrowthAverages: epsProfile.epsGrowthAverages,
+        conservativeEpsGrowth: epsProfile.conservativeEpsGrowth,
+        bookError: hasBookValue ? "" : "Morningstar 缺少每股帳面價值",
+        epsError: hasGrowthData ? "" : "Morningstar 缺少 EPS",
+        source: "Morningstar Key Metrics（10 年原始資料）",
+        asOf: Date.now()
+      };
+    }
+    throw new Error("Morningstar 沒有可用的 EPS 或每股帳面價值");
+  } catch (error) {
+    morningstarError = error;
+  }
+
   let facts = null;
   let secError = null;
   try {
@@ -3064,28 +3123,29 @@ async function fetchSecBookValueProfile(position) {
   } catch (error) {
     yahooError = error;
   }
-  const epsProfile = buildEpsGrowthProfile(
-    mergeEpsRows(yahooEpsProfile.epsRows, secEpsRows),
-    yahooEpsProfile.ttmEps
-  );
+  const fallbackEpsRows = mergeEpsRows(yahooEpsProfile.epsRows, secEpsRows);
+  const epsProfile = morningstarProfile?.hasGrowthData
+    ? buildEpsGrowthProfile(morningstarProfile.epsRows, morningstarProfile.ttmEps)
+    : buildEpsGrowthProfile(fallbackEpsRows, yahooEpsProfile.ttmEps);
   const secBookValuePerShare = Number.isFinite(equity) && Number.isFinite(shares) && shares > 0
     ? equity / shares
     : NaN;
   const yahooBookValuePerShare = Number(yahooEpsProfile.bookValuePerShare);
-  const bookValuePerShare = isBerkshireClassB(position)
+  const fallbackBookValuePerShare = isBerkshireClassB(position)
     ? firstFiniteNumber(yahooBookValuePerShare, secBookValuePerShare)
     : firstFiniteNumber(secBookValuePerShare, yahooBookValuePerShare);
+  const bookValuePerShare = firstFiniteNumber(morningstarProfile?.bookValuePerShare, fallbackBookValuePerShare);
   const hasBookValue = Number.isFinite(bookValuePerShare);
   const usableEps = firstFiniteNumber(epsProfile.ttmEps, epsProfile.latestEps);
   const hasGrowthData = Number.isFinite(usableEps);
 
   if (!hasBookValue && !hasGrowthData) {
-    throw new Error(secError?.message || yahooError?.message || "Missing SEC book value and EPS data");
+    throw new Error(morningstarError?.message || secError?.message || yahooError?.message || "Missing book value and EPS data");
   }
 
   return {
     symbol: position.symbol,
-    currency: "USD",
+    currency: morningstarProfile?.currency || "USD",
     methodVersion: FUNDAMENTAL_PROFILE_METHOD_VERSION,
     bookValuePerShare: hasBookValue ? bookValuePerShare : null,
     priceToBook: null,
@@ -3094,16 +3154,148 @@ async function fetchSecBookValueProfile(position) {
     latestEps: epsProfile.latestEps,
     epsGrowthAverages: epsProfile.epsGrowthAverages,
     conservativeEpsGrowth: epsProfile.conservativeEpsGrowth,
-    bookError: hasBookValue ? "" : (secError?.message || "SEC 每股帳面價值不足"),
-    epsError: hasGrowthData ? "" : (yahooError?.message || "EPS 資料不足"),
+    bookError: hasBookValue ? "" : (morningstarError?.message || secError?.message || "每股帳面價值不足"),
+    epsError: hasGrowthData ? "" : (morningstarError?.message || yahooError?.message || "EPS 資料不足"),
     source: [
-      facts ? "SEC companyfacts" : "",
+      morningstarProfile?.hasGrowthData || morningstarProfile?.hasBookValue ? "Morningstar Key Metrics（10 年原始資料）" : "",
+      facts ? "SEC companyfacts 備援" : "",
       yahooEpsProfile.epsRows.length || Number.isFinite(yahooEpsProfile.ttmEps) || Number.isFinite(yahooBookValuePerShare)
-        ? "Yahoo Finance 財務資料"
+        ? "Yahoo Finance 財務資料備援"
         : ""
     ].filter(Boolean).join(" + "),
     asOf: Date.now()
   };
+}
+
+async function fetchMorningstarFundamentalProfile(position) {
+  let lastError = null;
+  const targets = getMorningstarKeyMetricsCandidates(position);
+  for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
+    const target = targets[targetIndex];
+    const attempts = targetIndex === 0 ? 2 : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const configText = await fetchText(`${MORNINGSTAR_READER_BASE}/api/v2/stocks/${target.market}/${target.symbol}/key-metrics?refresh=${Date.now()}-${attempt}`, {
+          timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
+        });
+        const config = parseJsonFromText(configText);
+        const securityId = String(config?.page?.securityID || config?.page?.securityId || "").trim();
+        const token = String(config?.components?.maasToken?.payload || "").trim();
+        const contentType = String(config?.components?.salContentType?.payload || "").trim();
+        if (!securityId || !token || !contentType) throw new Error("Morningstar 頁面授權資料不完整");
+
+        const params = new URLSearchParams({
+          reportType: "A",
+          languageId: "en-US",
+          locale: "en-US",
+          clientId: "DOTCOM",
+          component: "sal-eqsv-key-metrics-financial-summary",
+          version: MORNINGSTAR_KEY_METRICS_VERSION
+        });
+        const summary = await fetchJson(`${MORNINGSTAR_SAL_BASE}/stock/keyMetrics/summary/${encodeURIComponent(securityId)}?${params}`, {
+          fallbackProxy: false,
+          timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-SAL-ContentType": contentType,
+            "X-API-RequestId": createRequestId()
+          }
+        });
+        const profile = parseMorningstarFundamentalSummary(summary);
+        if (!profile.epsRows.length && !Number.isFinite(profile.ttmEps) && !Number.isFinite(profile.bookValuePerShare)) {
+          throw new Error("Morningstar Key Metrics 沒有可用欄位");
+        }
+        return { ...profile, market: target.market, securityId };
+      } catch (error) {
+        lastError = error;
+        if (attempt + 1 < attempts) await sleep(FUNDAMENTAL_FETCH_RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw lastError || new Error("Morningstar Key Metrics unavailable");
+}
+
+function getMorningstarKeyMetricsCandidates(position) {
+  const baseSymbol = normalizeSecTicker(normalizedTicker(position).replace(/\.(US|NYSE|NASDAQ)$/i, ""));
+  const symbol = baseSymbol.replace(/-/g, ".").toLowerCase();
+  const exchange = GOOGLE_FINANCE_EXCHANGE_HINTS[baseSymbol.replace(/-.+$/, "")] || "";
+  const marketByExchange = {
+    NASDAQ: "xnas",
+    NYSE: "xnys",
+    NYSEAMERICAN: "xase"
+  };
+  const markets = [marketByExchange[exchange], "xnas", "xnys", "xase"].filter(Boolean);
+  return [...new Set(markets)].map((market) => ({ market, symbol }));
+}
+
+function parseMorningstarFundamentalSummary(summary) {
+  const incomeRows = Array.isArray(summary?.incomeStatementList?.dataList)
+    ? summary.incomeStatementList.dataList
+    : [];
+  const balanceRows = Array.isArray(summary?.balanceSheetList?.dataList)
+    ? summary.balanceSheetList.dataList
+    : [];
+  const annual = new Map();
+  let ttmEps = NaN;
+
+  incomeRows.forEach((row) => {
+    const eps = firstFiniteNumber(row?.dilutedEPS, row?.basicEPS, row?.normalizedEPS);
+    if (!Number.isFinite(eps)) return;
+    if (morningstarRowIsTrailing(row)) {
+      if (!Number.isFinite(ttmEps)) ttmEps = eps;
+      return;
+    }
+    const year = morningstarRowYear(row);
+    if (isReasonableFundamentalYear(year) && !annual.has(year)) annual.set(year, eps);
+  });
+
+  const bookCandidates = balanceRows
+    .map((row, index) => ({
+      value: firstFiniteNumber(row?.bookValuePerShare, row?.bookValuePerShareUSD),
+      time: morningstarRowTime(row, index)
+    }))
+    .filter((item) => Number.isFinite(item.value))
+    .sort((a, b) => b.time - a.time);
+
+  return {
+    currency: String(summary?.currency || summary?.footer?.currency || "USD").toUpperCase(),
+    epsRows: epsMapToRows(annual).slice(0, 10),
+    ttmEps,
+    bookValuePerShare: bookCandidates[0]?.value ?? NaN
+  };
+}
+
+function morningstarRowIsTrailing(row) {
+  return Object.values(row || {}).some((value) => /^(TTM|LTM|Last Twelve Months)$/i.test(String(value || "").trim()));
+}
+
+function morningstarRowYear(row) {
+  const values = [
+    row?.fiscalPeriodYear,
+    row?.calendarYear,
+    row?.fiscalYear,
+    row?.fiscalPeriodYearMonth,
+    row?.date,
+    row?.periodEndDate
+  ];
+  for (const value of values) {
+    const years = String(value || "").match(/(?:19|20)\d{2}/g);
+    const year = years?.length ? Number(years[years.length - 1]) : NaN;
+    if (isReasonableFundamentalYear(year)) return year;
+  }
+  return NaN;
+}
+
+function morningstarRowTime(row, index = 0) {
+  if (morningstarRowIsTrailing(row)) return Number.MAX_SAFE_INTEGER - index;
+  const directDate = Date.parse(String(row?.date || row?.periodEndDate || row?.fiscalPeriodEndDate || ""));
+  if (Number.isFinite(directDate)) return directDate;
+  const year = morningstarRowYear(row);
+  return Number.isFinite(year) ? Date.UTC(year, 11, 31) : -index;
+}
+
+function createRequestId() {
+  return globalThis.crypto?.randomUUID?.() || uid();
 }
 
 function buildSecAnnualEpsRows(gaap) {
@@ -3572,7 +3764,7 @@ async function fetchYahooDividendProfile(position) {
 async function fetchMorningstarDividendProfile(position) {
   const target = getMorningstarDividendTarget(position);
   if (!target) throw new Error("Morningstar target not supported");
-  const markdown = await fetchText(`https://r.jina.ai/http://https://www.morningstar.com/${target.path}`, { timeoutMs: 14_000 });
+  const markdown = await fetchText(`https://r.jina.ai/http://www.morningstar.com/${target.path}`, { timeoutMs: 14_000 });
   if (/Page Not Found|Access Denied|Too Many Requests/i.test(markdown)) throw new Error("Morningstar unavailable");
 
   const events = parseMorningstarDividendEvents(markdown);
@@ -3744,9 +3936,9 @@ async function fetchText(url, options = {}) {
 }
 
 async function fetchJson(url, options = {}) {
-  const { fallbackProxy = false, timeoutMs = 12_000 } = options;
+  const { fallbackProxy = false, timeoutMs = 12_000, headers = {} } = options;
   try {
-    return await fetchJsonDirect(url, timeoutMs);
+    return await fetchJsonDirect(url, timeoutMs, headers);
   } catch (error) {
     if (!fallbackProxy) throw error;
     try {
@@ -3754,7 +3946,7 @@ async function fetchJson(url, options = {}) {
       return parseJsonFromText(await fetchText(`https://r.jina.ai/http://${readerTarget}`, { timeoutMs }));
     } catch (readerError) {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      return fetchJsonDirect(proxyUrl, timeoutMs);
+      return fetchJsonDirect(proxyUrl, timeoutMs, headers);
     }
   }
 }
@@ -3766,12 +3958,13 @@ function parseJsonFromText(text) {
   return JSON.parse(text.slice(start, end + 1));
 }
 
-async function fetchJsonDirect(url, timeoutMs) {
+async function fetchJsonDirect(url, timeoutMs, headers = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       cache: "no-store",
+      headers,
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
