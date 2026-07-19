@@ -13,19 +13,11 @@ const DIVIDEND_FETCH_DELAY_MS = 350;
 const DIVIDEND_PROFILE_METHOD_VERSION = "payment-date-v76";
 const US_DIVIDEND_TAX_RATE = 0.3;
 const FUNDAMENTAL_CACHE_MS = 24 * 60 * 60 * 1000;
-const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v105";
-const FUNDAMENTAL_FETCH_CONCURRENCY = 1;
-const FUNDAMENTAL_FETCH_DELAY_MS = 3_000;
-const FUNDAMENTAL_FETCH_RETRY_DELAY_MS = 700;
-const FUNDAMENTAL_BATCH_RETRY_DELAY_MS = 5_000;
-const FUNDAMENTAL_BATCH_RETRY_ROUNDS = 2;
-const FUNDAMENTAL_ERROR_RETRY_MS = 90_000;
+const FUNDAMENTAL_PROFILE_METHOD_VERSION = "growth-asset-alert-v98";
+const FUNDAMENTAL_FETCH_CONCURRENCY = 4;
+const FUNDAMENTAL_FETCH_DELAY_MS = 80;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
-const MORNINGSTAR_KEY_METRICS_VERSION = "3.23.12";
-const MORNINGSTAR_READER_BASE = "https://r.jina.ai/http://www.morningstar.com";
-const MORNINGSTAR_SAL_BASE = "https://www.us-api.morningstar.com/sal/sal-service";
 const ASSET_STOCK_PB_THRESHOLD = 0.8;
-const BRK_B_ASSET_STOCK_PB_THRESHOLD = 1.2;
 const HISTORY_START_DATE = "2026-07-10";
 const HISTORY_MAX_POINTS = 2_500;
 const HISTORY_MIN_POINT_GAP_MS = 60_000;
@@ -159,27 +151,22 @@ const ALLOCATION_CATEGORIES = [
   { kind: "us-stock", label: "美股", color: "#d9472b" },
   { kind: "tw-stock", label: "台股", color: "#4d908e" }
 ];
-const GOOGLE_FINANCE_READER_BASE = "https://r.jina.ai/http://www.google.com/finance/quote/";
+const GOOGLE_FINANCE_READER_BASE = "https://r.jina.ai/http://https://www.google.com/finance/quote/";
 const DEFAULT_GOOGLE_US_EXCHANGES = ["NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN"];
 const GOOGLE_FINANCE_EXCHANGE_HINTS = {
   AAPL: "NASDAQ",
   AMD: "NASDAQ",
   AMZN: "NASDAQ",
-  ASML: "NASDAQ",
   COST: "NASDAQ",
-  INTC: "NASDAQ",
-  KHC: "NASDAQ",
   GOOGL: "NASDAQ",
   GOOG: "NASDAQ",
   META: "NASDAQ",
   MSFT: "NASDAQ",
   NFLX: "NASDAQ",
   NVDA: "NASDAQ",
-  PEP: "NASDAQ",
   QQQ: "NASDAQ",
   TQQQ: "NASDAQ",
   TSLA: "NASDAQ",
-  YORW: "NASDAQ",
   VOO: "NYSEARCA",
   SPY: "NYSEARCA",
   IVV: "NYSEARCA",
@@ -194,28 +181,13 @@ const GOOGLE_FINANCE_EXCHANGE_HINTS = {
   CCL: "NYSE",
   DIS: "NYSE",
   EL: "NYSE",
-  GIS: "NYSE",
-  HRL: "NYSE",
   JPM: "NYSE",
-  JNJ: "NYSE",
   KO: "NYSE",
-  MA: "NYSE",
-  MCD: "NYSE",
-  MMM: "NYSE",
   NKE: "NYSE",
-  NOK: "NYSE",
-  O: "NYSE",
-  PG: "NYSE",
-  SBUX: "NASDAQ",
-  T: "NYSE",
   TSM: "NYSE",
   UNH: "NYSE",
   V: "NYSE",
-  WFC: "NYSE",
-  WMT: "NYSE",
-  WTI: "NYSE",
-  WTRG: "NYSE",
-  XOM: "NYSE"
+  WMT: "NYSE"
 };
 
 const state = {
@@ -809,28 +781,6 @@ function formatPercent(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-function renderGrowthChange(change, changePercent) {
-  if (!dom.growthChange) return;
-  if (!Number.isFinite(change)) {
-    dom.growthChange.textContent = "--";
-    dom.growthChange.className = "";
-    dom.growthChange.removeAttribute("aria-label");
-    return;
-  }
-
-  const amountText = formatSensitiveCurrency(change);
-  const percentText = formatPercent(changePercent);
-  const amount = document.createElement("span");
-  const percent = document.createElement("span");
-  amount.className = "growth-change-amount";
-  percent.className = "growth-change-percent";
-  amount.textContent = amountText;
-  percent.textContent = percentText;
-  dom.growthChange.replaceChildren(amount, percent);
-  dom.growthChange.className = sensitiveClass(change) || valueClass(change);
-  dom.growthChange.setAttribute("aria-label", `${amountText} ${percentText}`);
-}
-
 function formatPlainPercent(value, maximumFractionDigits = 1) {
   if (!Number.isFinite(value)) return "--";
   return `${value.toFixed(maximumFractionDigits)}%`;
@@ -988,56 +938,37 @@ function isAssetStockAlertCandidate(position) {
   return isFundamentalAlertCandidate(position);
 }
 
-function isBerkshireClassB(position) {
-  if (!position) return false;
-  const symbol = normalizeSecTicker(normalizedTicker(position).replace(/\.(US|NYSE|NASDAQ)$/i, ""));
-  return symbol === "BRK-B";
-}
-
-function assetStockPbThreshold(position) {
-  return isBerkshireClassB(position) ? BRK_B_ASSET_STOCK_PB_THRESHOLD : ASSET_STOCK_PB_THRESHOLD;
-}
-
-function priceToBookIsPlausible(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0.05 && number <= 100;
-}
-
-function getAssetStockMetrics(position) {
-  const metrics = calculatePosition(position);
-  const profile = state.fundamentals.profiles[fundamentalKey(position)];
-  const quotePrice = Number(metrics.quote?.price);
-  const quoteCurrency = metrics.quoteCurrency || (position.kind === "tw-stock" ? "TWD" : "USD");
-  const bookCurrency = profile?.currency || quoteCurrency;
-  const bookValue = convertCurrency(firstFiniteNumber(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
-  const computedPriceToBook = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(bookValue) && bookValue > 0
-    ? quotePrice / bookValue
-    : NaN;
-  const priceToBook = firstFiniteNumber(computedPriceToBook, profile?.priceToBook);
-  return {
-    position,
-    metrics,
-    profile,
-    bookValue,
-    priceToBook: priceToBookIsPlausible(priceToBook) ? priceToBook : NaN,
-    threshold: assetStockPbThreshold(position)
-  };
-}
-
 function getAssetStockAlertRows() {
   return state.positions
     .filter(isAssetStockAlertCandidate)
-    .map(getAssetStockMetrics)
-    .filter(({ profile, priceToBook, threshold }) =>
+    .map((position) => {
+      const metrics = calculatePosition(position);
+      const profile = state.fundamentals.profiles[fundamentalKey(position)];
+      const quotePrice = Number(metrics.quote?.price);
+      const quoteCurrency = metrics.quoteCurrency || (position.kind === "tw-stock" ? "TWD" : "USD");
+      const bookCurrency = profile?.currency || quoteCurrency;
+      const bookValue = convertCurrency(Number(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
+      const computedPriceToBook = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(bookValue) && bookValue > 0
+        ? quotePrice / bookValue
+        : NaN;
+      return {
+        position,
+        metrics,
+        profile,
+        bookValue,
+        priceToBook: firstFiniteNumber(computedPriceToBook, profile?.priceToBook)
+      };
+    })
+    .filter(({ profile, priceToBook }) =>
       fundamentalProfileCanDisplay(profile)
-      && priceToBookIsPlausible(priceToBook)
-      && priceToBook < threshold
+      && Number.isFinite(priceToBook)
+      && priceToBook <= ASSET_STOCK_PB_THRESHOLD
     )
     .sort((a, b) => a.priceToBook - b.priceToBook);
 }
 
 function isGrowthStockAlertCandidate(position) {
-  return isFundamentalAlertCandidate(position);
+  return isFundamentalAlertCandidate(position) && !isBankStockPosition(position);
 }
 
 function getGrowthStockAlertRows() {
@@ -1053,14 +984,17 @@ function getGrowthStockAlertRows() {
       const peRatio = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(latestEps) && latestEps > 0
         ? quotePrice / latestEps
         : NaN;
-      const conservativeEpsGrowth = firstFiniteNumber(profile?.conservativeEpsGrowth);
+      const conservativeEpsGrowth = Number(profile?.conservativeEpsGrowth);
       const fairPrice = Number.isFinite(latestEps) && latestEps > 0 && Number.isFinite(conservativeEpsGrowth) && conservativeEpsGrowth > 0
         ? latestEps * conservativeEpsGrowth
         : NaN;
       const meetsCheapPe = Number.isFinite(peRatio) && peRatio <= GROWTH_PE_THRESHOLD;
-      const meetsGrowthValue = Number.isFinite(fairPrice)
+      const meetsGrowthValue = Number.isFinite(peRatio)
+        && Number.isFinite(conservativeEpsGrowth)
+        && peRatio < conservativeEpsGrowth
+        && Number.isFinite(fairPrice)
         && Number.isFinite(quotePrice)
-        && quotePrice <= fairPrice;
+        && quotePrice < fairPrice;
       return {
         position,
         metrics,
@@ -1075,8 +1009,8 @@ function getGrowthStockAlertRows() {
         meetsGrowthValue
       };
     })
-    .filter(({ position, profile, meetsCheapPe, meetsGrowthValue }) =>
-      fundamentalProfileHasGrowthData(position, profile)
+    .filter(({ profile, meetsCheapPe, meetsGrowthValue }) =>
+      fundamentalProfileCanDisplay(profile)
       && (meetsCheapPe || meetsGrowthValue)
     )
     .sort((a, b) => {
@@ -1093,94 +1027,23 @@ function fundamentalProfileCanDisplay(profile) {
   );
 }
 
-function fundamentalProfileHasGrowthData(position, profile) {
-  if (!fundamentalProfileCanDisplay(profile)) return false;
-  const metrics = calculatePosition(position);
-  const quotePrice = Number(metrics.quote?.price);
-  const quoteCurrency = metrics.quoteCurrency || "USD";
-  const epsCurrency = profile?.currency || quoteCurrency;
-  const latestEps = convertCurrency(firstFiniteNumber(profile?.ttmEps, profile?.latestEps), epsCurrency, quoteCurrency);
-  return Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(latestEps) && latestEps > 0;
-}
-
-function fundamentalProfileHasAssetData(position, profile) {
-  if (!fundamentalProfileCanDisplay(profile)) return false;
-  return priceToBookIsPlausible(getAssetStockMetrics(position).priceToBook);
-}
-
-function getGrowthFundamentalCheck(position, profile) {
-  if (!fundamentalProfileCanDisplay(profile)) {
-    return { status: "missing", reason: profile?.errorMessage || "財務資料取得失敗" };
-  }
-  const metrics = calculatePosition(position);
-  const quotePrice = Number(metrics.quote?.price);
-  if (!Number.isFinite(quotePrice) || quotePrice <= 0) {
-    return { status: "missing", reason: "缺少目前股價" };
-  }
-  const quoteCurrency = metrics.quoteCurrency || "USD";
-  const epsCurrency = profile?.currency || quoteCurrency;
-  const latestEps = convertCurrency(firstFiniteNumber(profile?.ttmEps, profile?.latestEps), epsCurrency, quoteCurrency);
-  if (!Number.isFinite(latestEps)) {
-    return { status: "missing", reason: profile?.epsError || "缺少 EPS" };
-  }
-  if (latestEps <= 0) {
-    return { status: "not-applicable", reason: "EPS <= 0，PE 與 EPS 門檻價不適用" };
-  }
-  if (!Number.isFinite(firstFiniteNumber(profile?.conservativeEpsGrowth))) {
-    return { status: "missing", reason: "3／5／10 年 EPS Growth 歷史不足" };
-  }
-  return { status: "ready", reason: "" };
-}
-
-function getAssetFundamentalCheck(position, profile) {
-  if (!fundamentalProfileCanDisplay(profile)) {
-    return { status: "missing", reason: profile?.errorMessage || "財務資料取得失敗" };
-  }
-  const { metrics, bookValue, priceToBook } = getAssetStockMetrics(position);
-  const quotePrice = Number(metrics.quote?.price);
-  if (!Number.isFinite(quotePrice) || quotePrice <= 0) {
-    return { status: "missing", reason: "缺少目前股價" };
-  }
-  if (!Number.isFinite(bookValue)) {
-    return { status: "missing", reason: profile?.bookError || "缺少每股帳面價值" };
-  }
-  if (bookValue <= 0) {
-    return { status: "not-applicable", reason: "每股帳面價值 <= 0，P/B 不適用" };
-  }
-  if (!priceToBookIsPlausible(priceToBook)) {
-    return { status: "missing", reason: "P/B 計算結果異常" };
-  }
-  return { status: "ready", reason: "" };
-}
-
-function getFundamentalAlertStats(predicate, checkMetric) {
+function getFundamentalAlertStats(predicate) {
   const positions = state.positions.filter(predicate);
   let ready = 0;
-  let missing = 0;
-  let notApplicable = 0;
-  const unavailableItems = [];
-  const notApplicableItems = [];
+  let errors = 0;
   positions.forEach((position) => {
     const profile = state.fundamentals.profiles[fundamentalKey(position)];
-    const check = checkMetric(position, profile);
-    if (check.status === "ready") {
+    if (fundamentalProfileCanDisplay(profile)) {
       ready += 1;
-    } else if (check.status === "not-applicable") {
-      notApplicable += 1;
-      notApplicableItems.push({ symbol: position.symbol, reason: check.reason });
-    } else {
-      missing += 1;
-      unavailableItems.push({ symbol: position.symbol, reason: check.reason });
+    } else if (profile?.error && profile.methodVersion === FUNDAMENTAL_PROFILE_METHOD_VERSION) {
+      errors += 1;
     }
   });
   return {
     total: positions.length,
     ready,
-    missing,
-    notApplicable,
-    checked: ready + notApplicable,
-    unavailableItems,
-    notApplicableItems
+    errors,
+    missing: Math.max(0, positions.length - ready - errors)
   };
 }
 
@@ -1188,14 +1051,14 @@ function formatFundamentalAlertStatus(stats, idleText = "等待更新") {
   const progress = state.fundamentals.progress || {};
   if (state.fundamentals.isRefreshing) {
     const total = Math.max(Number(progress.total) || 0, stats.total);
-    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.checked));
-    const errorText = stats.missing ? `，${stats.missing} 檔待補` : "";
+    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
+    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
     return `檢查中 ${done}/${total}${errorText}`;
   }
   if (!stats.total) return "沒有需要檢查的個股";
   if (state.fundamentals.lastSync) {
-    const missingText = stats.missing ? `，${stats.missing} 檔待補` : "";
-    return `已檢查 ${stats.checked}/${stats.total}${missingText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
+    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
+    return `已檢查 ${stats.ready}/${stats.total}${errorText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
   }
   return idleText;
 }
@@ -1204,25 +1067,11 @@ function formatFundamentalEmptyText(stats, loadingText) {
   const progress = state.fundamentals.progress || {};
   if (state.fundamentals.isRefreshing) {
     const total = Math.max(Number(progress.total) || 0, stats.total);
-    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.checked));
+    const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
     return `${loadingText} ${done}/${total}`;
   }
-  if (stats.checked || (state.fundamentals.lastSync && stats.missing)) {
-    return "已檢查，目前沒有符合條件";
-  }
+  if (stats.ready || stats.errors) return "已檢查，目前沒有符合條件";
   return "等待財務資料更新";
-}
-
-function renderFundamentalMissingList(stats, label) {
-  if (state.fundamentals.isRefreshing || !state.fundamentals.lastSync) return "";
-  const blocks = [];
-  if (stats.unavailableItems.length) {
-    const items = stats.unavailableItems
-      .map(({ symbol, reason }) => `${escapeHtml(symbol)}（${escapeHtml(reason)}）`)
-      .join("、");
-    blocks.push(`<div class="stock-alert-missing"><strong>${escapeHtml(label)}待補資料</strong><span>${items}</span></div>`);
-  }
-  return blocks.join("");
 }
 
 function calculatePortfolio() {
@@ -1370,7 +1219,7 @@ function drawGrowthChart(totals = calculatePortfolio()) {
     ctx.font = "700 15px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("等待今日資產紀錄", width / 2, height / 2);
-    renderGrowthChange(NaN, NaN);
+    if (dom.growthChange) dom.growthChange.textContent = "--";
     return;
   }
 
@@ -1461,7 +1310,10 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   const lastValue = convertCurrency(points[points.length - 1].valueTwd, "TWD", state.baseCurrency);
   const change = lastValue - firstValue;
   const changePercent = firstValue > 0 ? (change / firstValue) * 100 : NaN;
-  renderGrowthChange(change, changePercent);
+  if (dom.growthChange) {
+    dom.growthChange.textContent = `${formatSensitiveCurrency(change)} ${formatPercent(changePercent)}`;
+    dom.growthChange.className = sensitiveClass(change) || valueClass(change);
+  }
 
   ctx.fillStyle = muted;
   ctx.font = "700 11px system-ui, sans-serif";
@@ -1597,27 +1449,15 @@ function yieldAlertKey(row) {
 
 function ensureYieldAlertPanel() {
   let panel = document.querySelector("#yieldAlertPanel");
-  const watchlistTabPanel = document.querySelector("#watchlistTabPanel");
-  if (panel) {
-    if (watchlistTabPanel && panel.parentElement !== watchlistTabPanel) {
-      watchlistTabPanel.append(panel);
-    }
-    return panel;
-  }
-
-  panel = document.createElement("div");
-  panel.id = "yieldAlertPanel";
-  panel.className = "stock-alert-panel is-hidden";
-
-  if (watchlistTabPanel) {
-    watchlistTabPanel.append(panel);
-    return panel;
-  }
+  if (panel) return panel;
 
   const holdingsPanel = document.querySelector(".holdings-panel");
   const tableWrap = holdingsPanel?.querySelector(".table-wrap");
   if (!holdingsPanel || !tableWrap) return null;
 
+  panel = document.createElement("div");
+  panel.id = "yieldAlertPanel";
+  panel.className = "stock-alert-panel is-hidden";
   holdingsPanel.insertBefore(panel, tableWrap);
   return panel;
 }
@@ -1627,10 +1467,72 @@ function renderYieldAlerts() {
   if (!panel) return;
 
   const alerts = getYieldAlertRows();
+  const assetStockAlerts = getAssetStockAlertRows();
+  const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+  const alertItems = alerts.map(({ position, metrics }) => `
+    <span class="yield-alert-chip">
+      <strong>${escapeHtml(position.symbol)}</strong>
+      <span>${formatPlainPercent(metrics.currentDividendYield, 2)}</span>
+    </span>
+  `).join("");
+  const assetStockItems = assetStockAlerts.map(({ position, priceToBook }) => `
+    <span class="yield-alert-chip">
+      <strong>${escapeHtml(position.symbol)}</strong>
+      <span>P/B ${formatNumber(priceToBook, 2)}</span>
+    </span>
+  `).join("");
+  const assetStockStatus = state.fundamentals.isRefreshing
+    ? "正在更新每股帳面價值"
+    : state.fundamentals.lastSync
+      ? `更新 ${formatTime(state.fundamentals.lastSync)}`
+      : "等待更新";
+  const action = permission === "default"
+    ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
+    : `<span class="yield-alert-state">${permission === "granted" ? "系統通知已開啟" : permission === "denied" ? "通知目前被瀏覽器封鎖" : "此瀏覽器不支援系統通知"}</span>`;
+
+  panel.innerHTML = `
+    <div class="stock-alert-toolbar">
+      <div class="stock-alert-main">
+        <strong>提醒通知</strong>
+        <span>開啟後，符合提醒條件時會跳出通知</span>
+      </div>
+      <div class="yield-alert-actions">${action}</div>
+    </div>
+    <div class="stock-alert-card stock-alert-card-wide">
+      <div class="stock-alert-main">
+        <strong>股息股提醒</strong>
+        <span>個股當前殖利率超過 ${YIELD_ALERT_THRESHOLD}%</span>
+      </div>
+      <div class="yield-alert-list">${alertItems || `<span class="stock-alert-empty">目前沒有符合條件</span>`}</div>
+    </div>
+    <div class="stock-alert-card">
+      <div class="stock-alert-main">
+        <strong>成長股提醒</strong>
+        <span>等待設定篩選條件</span>
+      </div>
+      <span class="stock-alert-empty">下一步加入條件後啟用</span>
+    </div>
+    <div class="stock-alert-card">
+      <div class="stock-alert-main">
+        <strong>資產股提醒</strong>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，${assetStockStatus}</span>
+      </div>
+      <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在搜尋符合條件的資產股" : "目前沒有符合條件"}</span>`}</div>
+    </div>
+  `;
+  panel.classList.remove("is-hidden");
+  if (alerts.length) maybeNotifyYieldAlerts(alerts);
+}
+
+function renderYieldAlerts() {
+  const panel = ensureYieldAlertPanel();
+  if (!panel) return;
+
+  const alerts = getYieldAlertRows();
   const growthAlerts = getGrowthStockAlertRows();
   const assetStockAlerts = getAssetStockAlertRows();
-  const growthStats = getFundamentalAlertStats(isGrowthStockAlertCandidate, getGrowthFundamentalCheck);
-  const assetStockStats = getFundamentalAlertStats(isAssetStockAlertCandidate, getAssetFundamentalCheck);
+  const growthStats = getFundamentalAlertStats(isGrowthStockAlertCandidate);
+  const assetStockStats = getFundamentalAlertStats(isAssetStockAlertCandidate);
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
@@ -1639,26 +1541,15 @@ function renderYieldAlerts() {
     </span>
   `).join("");
   const growthItems = growthAlerts.map((row) => {
-    const averageText = GROWTH_ALERT_PERIODS
-      .map((period) => `${period}年 ${formatPlainPercent(row.profile?.epsGrowthAverages?.[period], 1)}`)
-      .join("／");
     const growthText = Number.isFinite(row.conservativeEpsGrowth)
-      ? `<span>平均 Growth：${averageText}</span><span>保守 Growth ${formatPlainPercent(row.conservativeEpsGrowth, 1)}</span>`
+      ? `<span>成長 ${formatPlainPercent(row.conservativeEpsGrowth, 1)}</span>`
       : "";
-    const reasonText = row.meetsCheapPe ? "PE <= 12" : "低於 EPS 門檻價";
-    const fairPriceText = Number.isFinite(row.fairPrice)
-      ? `<span>EPS ${formatNumber(row.latestEps, 2)} × ${formatNumber(row.conservativeEpsGrowth, 1)} = 門檻價 ${escapeHtml(row.quoteCurrency)} ${formatNumber(row.fairPrice, 2)}</span>`
-      : "";
-    const negativeEpsWarning = row.profile?.epsRows?.some((item) => Number(item.eps) <= 0)
-      ? `<span>注意：歷史 EPS 曾為負值，轉正年度會放大平均 Growth</span>`
-      : "";
+    const reasonText = row.meetsCheapPe ? "PE便宜" : "低於合理價";
     return `
       <span class="yield-alert-chip">
         <strong>${escapeHtml(row.position.symbol)}</strong>
         <span>PE ${formatNumber(row.peRatio, 1)}</span>
         ${growthText}
-        ${fairPriceText}
-        ${negativeEpsWarning}
         <span>${reasonText}</span>
       </span>
     `;
@@ -1671,8 +1562,6 @@ function renderYieldAlerts() {
   `).join("");
   const growthStatus = formatFundamentalAlertStatus(growthStats, "等待檢查成長股");
   const assetStockStatus = formatFundamentalAlertStatus(assetStockStats, "等待檢查每股帳面價值");
-  const growthMissingList = renderFundamentalMissingList(growthStats, "成長股");
-  const assetStockMissingList = renderFundamentalMissingList(assetStockStats, "資產股");
   const action = permission === "default"
     ? `<button class="yield-alert-button" type="button" data-action="enable-yield-notifications">開啟通知</button>`
     : `<span class="yield-alert-state">${permission === "granted" ? "通知已開啟" : permission === "denied" ? "通知被瀏覽器封鎖" : "此瀏覽器不支援通知"}</span>`;
@@ -1695,18 +1584,16 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>成長股提醒</strong>
-        <span>條件只有兩個：PE &lt;= ${GROWTH_PE_THRESHOLD}，或目前股價 &lt;= EPS × 保守 EPS Growth；保守值取近 3／5／10 年平均 EPS Growth 的最低值；暫時失敗只重試待補檔，不重抓已完成檔；${growthStatus}</span>
+        <span>非銀行股，PE <= ${GROWTH_PE_THRESHOLD}，或股價低於保守 EPS 成長合理價；${growthStatus}</span>
       </div>
       <div class="yield-alert-list">${growthItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(growthStats, "正在更新財務資料")}</span>`}</div>
-      ${growthMissingList}
     </div>
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>一般個股 P/B &lt; ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 特例 P/B &lt; ${formatNumber(BRK_B_ASSET_STOCK_PB_THRESHOLD, 1)}；暫時失敗只重試待補檔；${assetStockStatus}</span>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}；${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(assetStockStats, "正在檢查每股帳面價值")}</span>`}</div>
-      ${assetStockMissingList}
     </div>
   `;
   panel.classList.remove("is-hidden");
@@ -2584,15 +2471,12 @@ async function refreshPrices(options = {}) {
 async function fetchFxRates() {
   try {
     const data = await fetchJson("https://open.er-api.com/v6/latest/USD", { fallbackProxy: false });
-    if (!data?.rates?.TWD || !data?.rates?.EUR) throw new Error("Missing TWD or EUR rate");
-    const rates = Object.fromEntries(
-      Object.entries(data.rates)
-        .map(([currency, rate]) => [String(currency).toUpperCase(), Number(rate)])
-        .filter(([, rate]) => Number.isFinite(rate) && rate > 0)
-    );
-    rates.USD = 1;
+    if (!data?.rates?.TWD) throw new Error("Missing TWD rate");
     state.fx = {
-      rates,
+      rates: {
+        USD: 1,
+        TWD: Number(data.rates.TWD)
+      },
       asOf: Date.now(),
       source: "open.er-api.com"
     };
@@ -2915,9 +2799,7 @@ async function fetchTwseQuote(symbol) {
 
 function firstFiniteNumber(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    const number = Number(String(value).replaceAll(",", ""));
+    const number = Number(String(value ?? "").replaceAll(",", ""));
     if (Number.isFinite(number)) return number;
   }
   return NaN;
@@ -2972,7 +2854,6 @@ function fundamentalKey(position) {
 function fundamentalProfileIsFresh(profile) {
   if (!profile || profile.error) return false;
   if (profile.methodVersion !== FUNDAMENTAL_PROFILE_METHOD_VERSION) return false;
-  if (profile.bookError || profile.epsError) return false;
   return profile?.asOf && Date.now() - Number(profile.asOf) < FUNDAMENTAL_CACHE_MS;
 }
 
@@ -3006,11 +2887,12 @@ async function refreshFundamentalProfiles(options = {}) {
       renderYieldAlerts();
     };
 
-    const updateTarget = async (position, countProgress = false) => {
+    await mapWithConcurrency(targets, FUNDAMENTAL_FETCH_CONCURRENCY, async (position) => {
       const key = fundamentalKey(position);
       try {
         state.fundamentals.profiles[key] = await fetchFundamentalProfile(position);
       } catch (error) {
+        state.fundamentals.errors.push(position.symbol);
         state.fundamentals.profiles[key] = {
           symbol: position.symbol,
           currency: position.kind === "tw-stock" ? "TWD" : "USD",
@@ -3023,20 +2905,10 @@ async function refreshFundamentalProfiles(options = {}) {
           errorMessage: error.message || "無法取得每股帳面價值"
         };
       }
-      if (countProgress) state.fundamentals.progress.done += 1;
+      state.fundamentals.progress.done += 1;
       flushProgress();
       await sleep(FUNDAMENTAL_FETCH_DELAY_MS);
-    };
-
-    await mapWithConcurrency(targets, FUNDAMENTAL_FETCH_CONCURRENCY, (position) => updateTarget(position, true));
-    let failedTargets = targets.filter((position) => state.fundamentals.profiles[fundamentalKey(position)]?.error);
-    for (let round = 0; round < FUNDAMENTAL_BATCH_RETRY_ROUNDS && failedTargets.length; round += 1) {
-      await sleep(FUNDAMENTAL_BATCH_RETRY_DELAY_MS * (round + 1));
-      await mapWithConcurrency(failedTargets, 1, (position) => updateTarget(position, false));
-      failedTargets = failedTargets.filter((position) => state.fundamentals.profiles[fundamentalKey(position)]?.error);
-      flushProgress(true);
-    }
-    state.fundamentals.errors = failedTargets.map((position) => position.symbol);
+    });
     flushProgress(true);
     state.fundamentals.lastSync = Date.now();
   } finally {
@@ -3058,55 +2930,17 @@ async function fetchFundamentalProfile(position) {
 }
 
 async function fetchSecBookValueProfile(position) {
-  let morningstarError = null;
-  let morningstarProfile = null;
-  try {
-    const morningstar = await fetchMorningstarFundamentalProfile(position);
-    const epsProfile = buildEpsGrowthProfile(morningstar.epsRows, morningstar.ttmEps);
-    const usableEps = firstFiniteNumber(epsProfile.ttmEps, epsProfile.latestEps);
-    const hasGrowthData = Number.isFinite(usableEps);
-    const hasBookValue = Number.isFinite(Number(morningstar.bookValuePerShare));
-    morningstarProfile = { ...morningstar, ...epsProfile, hasGrowthData, hasBookValue };
-    if (hasGrowthData && hasBookValue) {
-      return {
-        symbol: position.symbol,
-        currency: morningstar.currency || "USD",
-        methodVersion: FUNDAMENTAL_PROFILE_METHOD_VERSION,
-        bookValuePerShare: hasBookValue ? Number(morningstar.bookValuePerShare) : null,
-        priceToBook: null,
-        epsRows: epsProfile.epsRows,
-        ttmEps: epsProfile.ttmEps,
-        latestEps: epsProfile.latestEps,
-        epsGrowthAverages: epsProfile.epsGrowthAverages,
-        conservativeEpsGrowth: epsProfile.conservativeEpsGrowth,
-        bookError: hasBookValue ? "" : "Morningstar 缺少每股帳面價值",
-        epsError: hasGrowthData ? "" : "Morningstar 缺少 EPS",
-        source: "Morningstar Key Metrics（10 年原始資料）",
-        asOf: Date.now()
-      };
-    }
-    throw new Error("Morningstar 沒有可用的 EPS 或每股帳面價值");
-  } catch (error) {
-    morningstarError = error;
-  }
-
-  let facts = null;
-  let secError = null;
-  try {
-    const cik = await findSecCik(position.marketSymbol || position.symbol);
-    if (!cik) throw new Error("SEC CIK not found");
-    const padded = String(cik).padStart(10, "0");
-    facts = await fetchFundamentalJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, {
-      fallbackProxy: true,
-      timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
-    });
-  } catch (error) {
-    secError = error;
-  }
-
+  const cik = await findSecCik(position.marketSymbol || position.symbol);
+  if (!cik) throw new Error("SEC CIK not found");
+  const padded = String(cik).padStart(10, "0");
+  const facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${padded}.json`, {
+    fallbackProxy: true,
+    timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS
+  });
   const gaap = facts?.facts?.["us-gaap"] || {};
   const dei = facts?.facts?.dei || {};
-  const reportedEquity = facts ? latestFactValue(gaap, [
+  const equity = firstFiniteNumber(
+    latestFactValue(gaap, [
       "StockholdersEquity",
       "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
       "StockholdersEquityAttributableToParent",
@@ -3114,12 +2948,10 @@ async function fetchSecBookValueProfile(position) {
       "TotalEquity",
       "AssetsNet",
       "PartnersCapital"
-    ], (unit) => unit === "USD") : NaN;
-  const assets = facts ? firstFiniteNumber(latestFactValue(gaap, ["Assets"], (unit) => unit === "USD")) : NaN;
-  const liabilities = facts ? firstFiniteNumber(latestFactValue(gaap, ["Liabilities"], (unit) => unit === "USD")) : NaN;
-  const balanceSheetEquity = Number.isFinite(assets) && Number.isFinite(liabilities) ? assets - liabilities : NaN;
-  const equity = firstFiniteNumber(reportedEquity, balanceSheetEquity);
-  const shares = facts ? firstFiniteNumber(
+    ], (unit) => unit === "USD"),
+    latestFactValue(gaap, ["Assets"], (unit) => unit === "USD") - latestFactValue(gaap, ["Liabilities"], (unit) => unit === "USD")
+  );
+  const shares = firstFiniteNumber(
     latestFactValue(dei, ["EntityCommonStockSharesOutstanding"], (unit) => unit.toLowerCase().includes("shares")),
     latestFactValue(gaap, [
       "CommonStockSharesOutstanding",
@@ -3132,194 +2964,32 @@ async function fetchSecBookValueProfile(position) {
       "WeightedAverageNumberOfSharesOutstandingBasic",
       "WeightedAverageNumberOfShareOutstandingBasicAndDiluted"
     ], (unit) => unit.toLowerCase().includes("shares"))
-  ) : NaN;
+  );
 
-  const secEpsRows = facts ? buildSecAnnualEpsRows(gaap) : [];
-  let yahooEpsProfile = { epsRows: [], ttmEps: NaN, bookValuePerShare: NaN };
-  let yahooError = null;
-  try {
-    yahooEpsProfile = await fetchYahooEpsProfile(position);
-  } catch (error) {
-    yahooError = error;
-  }
-  const fallbackEpsRows = mergeEpsRows(yahooEpsProfile.epsRows, secEpsRows);
-  const epsProfile = morningstarProfile?.hasGrowthData
-    ? buildEpsGrowthProfile(morningstarProfile.epsRows, morningstarProfile.ttmEps)
-    : buildEpsGrowthProfile(fallbackEpsRows, yahooEpsProfile.ttmEps);
-  const secBookValuePerShare = Number.isFinite(equity) && Number.isFinite(shares) && shares > 0
-    ? equity / shares
-    : NaN;
-  const yahooBookValuePerShare = Number(yahooEpsProfile.bookValuePerShare);
-  const fallbackBookValuePerShare = isBerkshireClassB(position)
-    ? firstFiniteNumber(yahooBookValuePerShare, secBookValuePerShare)
-    : firstFiniteNumber(secBookValuePerShare, yahooBookValuePerShare);
-  const bookValuePerShare = firstFiniteNumber(morningstarProfile?.bookValuePerShare, fallbackBookValuePerShare);
-  const hasBookValue = Number.isFinite(bookValuePerShare);
-  const usableEps = firstFiniteNumber(epsProfile.ttmEps, epsProfile.latestEps);
-  const hasGrowthData = Number.isFinite(usableEps);
+  if (!Number.isFinite(equity) || equity <= 0) throw new Error("Missing stockholders equity");
+  if (!Number.isFinite(shares) || shares <= 0) throw new Error("Missing shares outstanding");
 
-  if (!hasBookValue && !hasGrowthData) {
-    throw new Error(morningstarError?.message || secError?.message || yahooError?.message || "Missing book value and EPS data");
-  }
+  const secEpsRows = buildSecAnnualEpsRows(gaap);
+  const yahooEpsProfile = await fetchYahooEpsProfile(position).catch(() => ({ epsRows: [], ttmEps: NaN }));
+  const epsProfile = buildEpsGrowthProfile(
+    mergeEpsRows(secEpsRows, yahooEpsProfile.epsRows),
+    yahooEpsProfile.ttmEps
+  );
 
   return {
     symbol: position.symbol,
-    currency: morningstarProfile?.currency || "USD",
+    currency: "USD",
     methodVersion: FUNDAMENTAL_PROFILE_METHOD_VERSION,
-    bookValuePerShare: hasBookValue ? bookValuePerShare : null,
+    bookValuePerShare: equity / shares,
     priceToBook: null,
     epsRows: epsProfile.epsRows,
     ttmEps: epsProfile.ttmEps,
     latestEps: epsProfile.latestEps,
     epsGrowthAverages: epsProfile.epsGrowthAverages,
     conservativeEpsGrowth: epsProfile.conservativeEpsGrowth,
-    bookError: hasBookValue ? "" : (morningstarError?.message || secError?.message || "每股帳面價值不足"),
-    epsError: hasGrowthData ? "" : (morningstarError?.message || yahooError?.message || "EPS 資料不足"),
-    source: [
-      morningstarProfile?.hasGrowthData || morningstarProfile?.hasBookValue ? "Morningstar Key Metrics（10 年原始資料）" : "",
-      facts ? "SEC companyfacts 備援" : "",
-      yahooEpsProfile.epsRows.length || Number.isFinite(yahooEpsProfile.ttmEps) || Number.isFinite(yahooBookValuePerShare)
-        ? "Yahoo Finance 財務資料備援"
-        : ""
-    ].filter(Boolean).join(" + "),
+    source: "SEC companyfacts",
     asOf: Date.now()
   };
-}
-
-async function fetchMorningstarFundamentalProfile(position) {
-  let lastError = null;
-  const targets = getMorningstarKeyMetricsCandidates(position);
-  for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
-    const target = targets[targetIndex];
-    const attempts = targetIndex === 0 ? 2 : 1;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      try {
-        const configText = await fetchText(`${MORNINGSTAR_READER_BASE}/api/v2/stocks/${target.market}/${target.symbol}/key-metrics`, {
-          timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS,
-          headers: attempt > 0 ? { "X-No-Cache": "true" } : {}
-        });
-        const config = parseJsonFromText(configText);
-        if (Number(config?.code) === 429) {
-          const retryAfter = Math.max(2, Number(config?.retryAfter) || 2);
-          throw new Error(`Morningstar 暫時限流，${retryAfter} 秒後自動重試`);
-        }
-        const securityId = String(config?.page?.securityID || config?.page?.securityId || "").trim();
-        const token = String(config?.components?.maasToken?.payload || "").trim();
-        const contentType = String(config?.components?.salContentType?.payload || "").trim();
-        if (!securityId || !token || !contentType) throw new Error("Morningstar 頁面授權資料不完整");
-
-        const params = new URLSearchParams({
-          reportType: "A",
-          languageId: "en-US",
-          locale: "en-US",
-          clientId: "DOTCOM",
-          component: "sal-eqsv-key-metrics-financial-summary",
-          version: MORNINGSTAR_KEY_METRICS_VERSION
-        });
-        const summary = await fetchJson(`${MORNINGSTAR_SAL_BASE}/stock/keyMetrics/summary/${encodeURIComponent(securityId)}?${params}`, {
-          fallbackProxy: false,
-          timeoutMs: FUNDAMENTAL_FETCH_TIMEOUT_MS,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "X-SAL-ContentType": contentType,
-            "X-API-RequestId": createRequestId()
-          }
-        });
-        const profile = parseMorningstarFundamentalSummary(summary);
-        if (!profile.epsRows.length && !Number.isFinite(profile.ttmEps) && !Number.isFinite(profile.bookValuePerShare)) {
-          throw new Error("Morningstar Key Metrics 沒有可用欄位");
-        }
-        return { ...profile, market: target.market, securityId };
-      } catch (error) {
-        lastError = error;
-        if (attempt + 1 < attempts) await sleep(FUNDAMENTAL_FETCH_RETRY_DELAY_MS);
-      }
-    }
-  }
-  throw lastError || new Error("Morningstar Key Metrics unavailable");
-}
-
-function getMorningstarKeyMetricsCandidates(position) {
-  const baseSymbol = normalizeSecTicker(normalizedTicker(position).replace(/\.(US|NYSE|NASDAQ)$/i, ""));
-  const symbol = baseSymbol.replace(/-/g, ".").toLowerCase();
-  const exchange = GOOGLE_FINANCE_EXCHANGE_HINTS[baseSymbol.replace(/-.+$/, "")] || "";
-  const marketByExchange = {
-    NASDAQ: "xnas",
-    NYSE: "xnys",
-    NYSEAMERICAN: "xase"
-  };
-  const markets = [marketByExchange[exchange], "xnas", "xnys", "xase"].filter(Boolean);
-  return [...new Set(markets)].map((market) => ({ market, symbol }));
-}
-
-function parseMorningstarFundamentalSummary(summary) {
-  const incomeRows = Array.isArray(summary?.incomeStatementList?.dataList)
-    ? summary.incomeStatementList.dataList
-    : [];
-  const balanceRows = Array.isArray(summary?.balanceSheetList?.dataList)
-    ? summary.balanceSheetList.dataList
-    : [];
-  const annual = new Map();
-  let ttmEps = NaN;
-
-  incomeRows.forEach((row) => {
-    const eps = firstFiniteNumber(row?.dilutedEPS, row?.basicEPS, row?.normalizedEPS);
-    if (!Number.isFinite(eps)) return;
-    if (morningstarRowIsTrailing(row)) {
-      if (!Number.isFinite(ttmEps)) ttmEps = eps;
-      return;
-    }
-    const year = morningstarRowYear(row);
-    if (isReasonableFundamentalYear(year) && !annual.has(year)) annual.set(year, eps);
-  });
-
-  const bookCandidates = balanceRows
-    .map((row, index) => ({
-      value: firstFiniteNumber(row?.bookValuePerShare, row?.bookValuePerShareUSD),
-      time: morningstarRowTime(row, index)
-    }))
-    .filter((item) => Number.isFinite(item.value))
-    .sort((a, b) => b.time - a.time);
-
-  return {
-    currency: String(summary?.currency || summary?.footer?.currency || "USD").toUpperCase(),
-    epsRows: epsMapToRows(annual).slice(0, 10),
-    ttmEps,
-    bookValuePerShare: bookCandidates[0]?.value ?? NaN
-  };
-}
-
-function morningstarRowIsTrailing(row) {
-  return Object.values(row || {}).some((value) => /^(TTM|LTM|Last Twelve Months)$/i.test(String(value || "").trim()));
-}
-
-function morningstarRowYear(row) {
-  const values = [
-    row?.fiscalPeriodYear,
-    row?.calendarYear,
-    row?.fiscalYear,
-    row?.fiscalPeriodYearMonth,
-    row?.date,
-    row?.periodEndDate
-  ];
-  for (const value of values) {
-    const years = String(value || "").match(/(?:19|20)\d{2}/g);
-    const year = years?.length ? Number(years[years.length - 1]) : NaN;
-    if (isReasonableFundamentalYear(year)) return year;
-  }
-  return NaN;
-}
-
-function morningstarRowTime(row, index = 0) {
-  if (morningstarRowIsTrailing(row)) return Number.MAX_SAFE_INTEGER - index;
-  const directDate = Date.parse(String(row?.date || row?.periodEndDate || row?.fiscalPeriodEndDate || ""));
-  if (Number.isFinite(directDate)) return directDate;
-  const year = morningstarRowYear(row);
-  return Number.isFinite(year) ? Date.UTC(year, 11, 31) : -index;
-}
-
-function createRequestId() {
-  return globalThis.crypto?.randomUUID?.() || uid();
 }
 
 function buildSecAnnualEpsRows(gaap) {
@@ -3357,25 +3027,18 @@ async function fetchYahooEpsProfile(position) {
     "trailingDilutedEPS",
     "trailingBasicEPS",
     "annualDilutedEPS",
-    "annualBasicEPS",
-    "quarterlyStockholdersEquity",
-    "annualStockholdersEquity",
-    "quarterlyDilutedAverageShares",
-    "annualDilutedAverageShares"
+    "annualBasicEPS"
   ];
   let lastError = null;
-  const hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
-  for (let hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
-    const host = hosts[hostIndex];
+  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
     try {
       const url = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?symbol=${encodeURIComponent(symbol)}&type=${types.join(",")}&period1=${start}&period2=${end}`;
       const data = await fetchJson(url, { fallbackProxy: true, timeoutMs: 14_000 });
       const profile = parseYahooEpsProfile(data);
-      if (profile.epsRows.length || Number.isFinite(profile.ttmEps) || Number.isFinite(profile.bookValuePerShare)) return profile;
-      lastError = new Error("Yahoo 財務資料沒有可用欄位");
+      if (profile.epsRows.length || Number.isFinite(profile.ttmEps)) return profile;
+      lastError = new Error("Yahoo EPS returned no rows");
     } catch (error) {
       lastError = error;
-      if (hostIndex < hosts.length - 1) await sleep(FUNDAMENTAL_FETCH_RETRY_DELAY_MS);
     }
   }
   throw lastError || new Error("Yahoo EPS unavailable");
@@ -3384,7 +3047,6 @@ async function fetchYahooEpsProfile(position) {
 function parseYahooEpsProfile(data) {
   const annual = new Map();
   const trailing = {};
-  const supplemental = {};
   (data?.timeseries?.result || []).forEach((entry) => {
     const type = entry?.meta?.type?.[0];
     if (!type || !Array.isArray(entry[type])) return;
@@ -3395,32 +3057,17 @@ function parseYahooEpsProfile(data) {
         storeLatestEpsPoint(trailing, type, point);
         return;
       }
-      if (/^(quarterly|annual)(StockholdersEquity|DilutedAverageShares)$/.test(type)) {
-        storeLatestEpsPoint(supplemental, type, point);
-        return;
-      }
       const year = Number(String(point.asOfDate || "").slice(0, 4));
       if (!isReasonableFundamentalYear(year)) return;
       if (type === "annualDilutedEPS" || !annual.has(year)) annual.set(year, value);
     });
   });
-  const latestEquity = firstFiniteNumber(
-    latestStoredEpsValue(supplemental, "quarterlyStockholdersEquity"),
-    latestStoredEpsValue(supplemental, "annualStockholdersEquity")
-  );
-  const latestShares = firstFiniteNumber(
-    latestStoredEpsValue(supplemental, "quarterlyDilutedAverageShares"),
-    latestStoredEpsValue(supplemental, "annualDilutedAverageShares")
-  );
   return {
     epsRows: epsMapToRows(annual),
     ttmEps: firstFiniteNumber(
       latestStoredEpsValue(trailing, "trailingDilutedEPS"),
       latestStoredEpsValue(trailing, "trailingBasicEPS")
-    ),
-    bookValuePerShare: Number.isFinite(latestEquity) && Number.isFinite(latestShares) && latestShares > 0
-      ? latestEquity / latestShares
-      : NaN
+    )
   };
 }
 
@@ -3560,11 +3207,10 @@ function buildEpsGrowthProfile(epsRows, ttmEps = NaN) {
       : NaN;
     return { year, eps, epsGrowth };
   });
+  const growthValues = rowsWithGrowth.map((row) => Number(row.epsGrowth)).filter(Number.isFinite);
   const epsGrowthAverages = Object.fromEntries(GROWTH_ALERT_PERIODS.map((period) => {
-    const recentGrowthValues = rowsWithGrowth
-      .slice(0, period)
-      .map((row) => row.epsGrowth);
-    return [period, averageFinite(recentGrowthValues)];
+    const values = growthValues.slice(0, period);
+    return [period, averageFinite(values)];
   }));
   const conservativeGrowthValues = Object.values(epsGrowthAverages).filter(Number.isFinite);
   const ttm = Number(ttmEps);
@@ -3574,23 +3220,8 @@ function buildEpsGrowthProfile(epsRows, ttmEps = NaN) {
     ttmEps: Number.isFinite(ttm) ? ttm : NaN,
     latestEps: firstFiniteNumber(ttm, latestAnnualEps),
     epsGrowthAverages,
-    conservativeEpsGrowth: conservativeGrowthValues.length
-      ? Math.min(...conservativeGrowthValues)
-      : NaN
+    conservativeEpsGrowth: conservativeGrowthValues.length ? Math.min(...conservativeGrowthValues) : NaN
   };
-}
-
-async function fetchFundamentalJson(url, options = {}) {
-  let lastError = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      return await fetchJson(url, options);
-    } catch (error) {
-      lastError = error;
-      if (attempt === 0) await sleep(FUNDAMENTAL_FETCH_RETRY_DELAY_MS);
-    }
-  }
-  throw lastError || new Error("財務資料取得失敗");
 }
 
 function averageFinite(values) {
@@ -3718,7 +3349,7 @@ function handleRefreshClick() {
   if (dom.syncStatus) dom.syncStatus.textContent = "已點擊更新，正在重新同步市場價格...";
   refreshPrices({ force: true, manual: true });
   refreshDividendProfiles();
-  refreshFundamentalProfiles({ force: !getFundamentalTargets().length });
+  refreshFundamentalProfiles({ force: true });
 }
 
 window.wealthtrackManualRefresh = handleRefreshClick;
@@ -3788,7 +3419,7 @@ async function fetchYahooDividendProfile(position) {
 async function fetchMorningstarDividendProfile(position) {
   const target = getMorningstarDividendTarget(position);
   if (!target) throw new Error("Morningstar target not supported");
-  const markdown = await fetchText(`https://r.jina.ai/http://www.morningstar.com/${target.path}`, { timeoutMs: 14_000 });
+  const markdown = await fetchText(`https://r.jina.ai/http://https://www.morningstar.com/${target.path}`, { timeoutMs: 14_000 });
   if (/Page Not Found|Access Denied|Too Many Requests/i.test(markdown)) throw new Error("Morningstar unavailable");
 
   const events = parseMorningstarDividendEvents(markdown);
@@ -3944,13 +3575,12 @@ function inferDividendFrequency(events, position) {
 }
 
 async function fetchText(url, options = {}) {
-  const { timeoutMs = 12_000, headers = {} } = options;
+  const { timeoutMs = 12_000 } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       cache: "no-store",
-      headers,
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -3961,17 +3591,16 @@ async function fetchText(url, options = {}) {
 }
 
 async function fetchJson(url, options = {}) {
-  const { fallbackProxy = false, timeoutMs = 12_000, headers = {} } = options;
+  const { fallbackProxy = false, timeoutMs = 12_000 } = options;
   try {
-    return await fetchJsonDirect(url, timeoutMs, headers);
+    return await fetchJsonDirect(url, timeoutMs);
   } catch (error) {
     if (!fallbackProxy) throw error;
     try {
-      const readerTarget = String(url).replace(/^https?:\/\//i, "");
-      return parseJsonFromText(await fetchText(`https://r.jina.ai/http://${readerTarget}`, { timeoutMs }));
+      return parseJsonFromText(await fetchText(`https://r.jina.ai/http://${url}`, { timeoutMs }));
     } catch (readerError) {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      return fetchJsonDirect(proxyUrl, timeoutMs, headers);
+      return fetchJsonDirect(proxyUrl, timeoutMs);
     }
   }
 }
@@ -3983,13 +3612,12 @@ function parseJsonFromText(text) {
   return JSON.parse(text.slice(start, end + 1));
 }
 
-async function fetchJsonDirect(url, timeoutMs, headers = {}) {
+async function fetchJsonDirect(url, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       cache: "no-store",
-      headers,
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -4031,7 +3659,7 @@ function handleSubmit(event) {
     render();
     refreshPrices();
     refreshDividendProfiles();
-    refreshFundamentalProfiles();
+    refreshFundamentalProfiles({ force: true });
   } catch (error) {
     window.alert(error.message || "無法儲存資產");
   }
@@ -4053,7 +3681,24 @@ function editPosition(id) {
   dom.submitAssetButton.textContent = "更新資產";
   dom.cancelEditButton.classList.remove("is-hidden");
   updateKindMode();
-  dom.assetSymbol.focus();
+  showAssetEditor();
+}
+
+function showAssetEditor() {
+  const overviewTab = document.querySelector('[data-dashboard-tab="overview"]');
+  if (overviewTab && overviewTab.getAttribute("aria-selected") !== "true") {
+    overviewTab.click();
+  }
+
+  window.requestAnimationFrame(() => {
+    const target = dom.form.closest(".tool-card") || dom.form;
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      dom.assetSymbol.focus({ preventScroll: true });
+    } catch (error) {
+      dom.assetSymbol.focus();
+    }
+  });
 }
 
 function deletePosition(id) {
@@ -4999,6 +4644,8 @@ function bindEvents() {
   dom.positionsBody.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
     if (button) {
+      event.preventDefault();
+      event.stopPropagation();
       const id = button.dataset.id;
       if (button.dataset.action === "edit") editPosition(id);
       if (button.dataset.action === "delete") deletePosition(id);
@@ -5112,7 +4759,3 @@ if (state.positions.length) {
 setInterval(() => {
   if (state.positions.length && document.visibilityState === "visible") refreshPrices();
 }, REFRESH_MS);
-
-setInterval(() => {
-  if (state.positions.length && document.visibilityState === "visible") refreshFundamentalProfiles();
-}, FUNDAMENTAL_ERROR_RETRY_MS);
