@@ -6,7 +6,7 @@
 
   if (originalRegister) {
     serviceWorker.register = (url, options) => {
-      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v108.js");
+      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v102.js");
       return originalRegister(nextUrl, options);
     };
   }
@@ -25,7 +25,6 @@
     tabs.innerHTML = `
       <button class="dashboard-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="overviewTabPanel" id="overviewTab" data-dashboard-tab="overview">總覽</button>
       <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="holdingsTabPanel" id="holdingsTab" data-dashboard-tab="holdings">持倉</button>
-      <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="watchlistTabPanel" id="watchlistTab" data-dashboard-tab="watchlist">觀察清單</button>
     `;
 
     const overviewPanel = document.createElement("section");
@@ -41,22 +40,14 @@
     holdingsTabPanel.setAttribute("aria-labelledby", "holdingsTab");
     holdingsTabPanel.hidden = true;
 
-    const watchlistTabPanel = document.createElement("section");
-    watchlistTabPanel.className = "dashboard-tab-panel";
-    watchlistTabPanel.id = "watchlistTabPanel";
-    watchlistTabPanel.setAttribute("role", "tabpanel");
-    watchlistTabPanel.setAttribute("aria-labelledby", "watchlistTab");
-    watchlistTabPanel.hidden = true;
-
     main.insertBefore(tabs, summaryGrid);
     main.insertBefore(overviewPanel, summaryGrid);
     overviewPanel.append(summaryGrid, workspaceGrid);
     main.insertBefore(holdingsTabPanel, overviewPanel.nextSibling);
     holdingsTabPanel.append(holdingsPanel);
-    main.insertBefore(watchlistTabPanel, holdingsTabPanel.nextSibling);
 
     const buttons = [...tabs.querySelectorAll("[data-dashboard-tab]")];
-    const panels = { overview: overviewPanel, holdings: holdingsTabPanel, watchlist: watchlistTabPanel };
+    const panels = { overview: overviewPanel, holdings: holdingsTabPanel };
 
     const setActiveTab = (nextTab) => {
       const activeTab = panels[nextTab] ? nextTab : "overview";
@@ -89,8 +80,7 @@
     } catch (error) {
       storedTab = "";
     }
-    const initialTab = panels[queryTab] ? queryTab : storedTab;
-    setActiveTab(panels[initialTab] ? initialTab : "overview");
+    setActiveTab(queryTab === "holdings" ? "holdings" : storedTab || "overview");
   }
 
   function ensureV58Layout() {
@@ -104,10 +94,10 @@
       document.head.appendChild(stylesheet);
     }
 
-    if (!document.querySelector('link[href^="dashboard-tabs-v58.css"]')) {
+    if (!document.querySelector('link[href="dashboard-tabs-v58.css"]')) {
       const stylesheet = document.createElement("link");
       stylesheet.rel = "stylesheet";
-      stylesheet.href = "dashboard-tabs-v58.css?v=108";
+      stylesheet.href = "dashboard-tabs-v58.css";
       document.head.appendChild(stylesheet);
     }
 
@@ -142,10 +132,10 @@
   }
 
   ensureV58Layout();
-  loadScript("app-v47.js?v=108")
-    .then(() => loadScript("growth-history-v73.js?v=108"))
-    .then(() => loadScript("growth-chart-hover-v74.js?v=108"))
-    .then(() => loadScript("overview-dividends-sort-v75.js?v=108"))
-    .then(() => loadScript("holdings-sticky-v65.js?v=108"))
+  loadScript("app-v47.js?v=102")
+    .then(() => loadScript("growth-history-v73.js?v=102"))
+    .then(() => loadScript("growth-chart-hover-v74.js?v=102"))
+    .then(() => loadScript("overview-dividends-sort-v75.js?v=102"))
+    .then(() => loadScript("holdings-sticky-v65.js?v=102"))
     .catch((error) => console.warn("WealthTrack v58 patch failed", error));
 })();
