@@ -44,10 +44,6 @@
   margin-bottom: 0;
 }
 
-#watchlistTabPanel .stock-alert-panel {
-  margin: 0;
-}
-
 @media (max-width: 680px) {
   .dashboard-tabs {
     position: sticky;
@@ -62,18 +58,6 @@
 
   .dashboard-tab {
     min-height: 44px;
-    font-size: 1rem;
-    padding-inline: 8px;
-  }
-}
-
-@media (max-width: 420px) {
-  .dashboard-tabs {
-    gap: 6px;
-  }
-
-  .dashboard-tab {
-    font-size: 0.92rem;
-    padding-inline: 4px;
+    font-size: 0.95rem;
   }
 }
