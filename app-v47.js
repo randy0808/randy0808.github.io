@@ -1348,8 +1348,15 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   ctx.fillText(formatHistoryPointLabel(points[points.length - 1], includeTime), chart.right, height - 14);
 }
 
+let isRenderingGrowthChange = false;
 function renderGrowthChange(totals = calculatePortfolio()) {
-  drawGrowthChart(totals);
+  if (isRenderingGrowthChange) return;
+  isRenderingGrowthChange = true;
+  try {
+    drawGrowthChart(totals);
+  } finally {
+    isRenderingGrowthChange = false;
+  }
 }
 
 window.renderGrowthChange = renderGrowthChange;
