@@ -1324,6 +1324,12 @@ function drawGrowthChart(totals = calculatePortfolio()) {
   ctx.fillText(formatHistoryPointLabel(points[points.length - 1], includeTime), chart.right, height - 14);
 }
 
+function renderGrowthChange(totals = calculatePortfolio()) {
+  drawGrowthChart(totals);
+}
+
+window.renderGrowthChange = renderGrowthChange;
+
 function render() {
   const totals = calculatePortfolio();
   const profit = totals.value - totals.cost;
