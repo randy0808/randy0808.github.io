@@ -1030,21 +1030,46 @@ function fundamentalProfileCanDisplay(profile) {
 function getFundamentalAlertStats(predicate) {
   const positions = state.positions.filter(predicate);
   let ready = 0;
-  let errors = 0;
+  const missingSymbols = [];
+  const missingDetails = [];
   positions.forEach((position) => {
     const profile = state.fundamentals.profiles[fundamentalKey(position)];
     if (fundamentalProfileCanDisplay(profile)) {
       ready += 1;
-    } else if (profile?.error && profile.methodVersion === FUNDAMENTAL_PROFILE_METHOD_VERSION) {
-      errors += 1;
+    } else {
+      const symbol = position.symbol || position.marketSymbol || "未知";
+      missingSymbols.push(symbol);
+      missingDetails.push({
+        symbol,
+        reason: getFundamentalMissingReason(profile)
+      });
     }
   });
+  const missing = missingSymbols.length;
   return {
     total: positions.length,
     ready,
-    errors,
-    missing: Math.max(0, positions.length - ready - errors)
+    errors: missing,
+    missing,
+    missingSymbols,
+    missingDetails
   };
+}
+
+function getFundamentalMissingReason(profile) {
+  if (!profile) return "尚未取得";
+  if (profile.methodVersion !== FUNDAMENTAL_PROFILE_METHOD_VERSION) return "資料版本需更新";
+  if (profile.error) return profile.errorMessage || "來源缺資料";
+  return "資料不完整";
+}
+
+function formatFundamentalMissingText(stats) {
+  if (!stats?.errors) return "";
+  const symbols = Array.from(new Set(stats.missingSymbols || [])).filter(Boolean);
+  if (!symbols.length) return `，${stats.errors} 檔缺資料`;
+  const visible = symbols.slice(0, 8).map(escapeHtml).join("、");
+  const more = symbols.length > 8 ? ` 等 ${symbols.length} 檔` : "";
+  return `，${stats.errors} 檔缺：${visible}${more}`;
 }
 
 function formatFundamentalAlertStatus(stats, idleText = "等待更新") {
@@ -1052,13 +1077,12 @@ function formatFundamentalAlertStatus(stats, idleText = "等待更新") {
   if (state.fundamentals.isRefreshing) {
     const total = Math.max(Number(progress.total) || 0, stats.total);
     const done = Math.min(total, Math.max(Number(progress.done) || 0, stats.ready + stats.errors));
-    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
-    return `檢查中 ${done}/${total}${errorText}`;
+    const verb = total && done >= total ? "已檢查" : "檢查中";
+    return `${verb} ${done}/${total}${formatFundamentalMissingText(stats)}`;
   }
   if (!stats.total) return "沒有需要檢查的個股";
   if (state.fundamentals.lastSync) {
-    const errorText = stats.errors ? `，${stats.errors} 檔缺資料` : "";
-    return `已檢查 ${stats.ready}/${stats.total}${errorText}，更新 ${formatTime(state.fundamentals.lastSync)}`;
+    return `已檢查 ${stats.ready}/${stats.total}${formatFundamentalMissingText(stats)}，更新 ${formatTime(state.fundamentals.lastSync)}`;
   }
   return idleText;
 }
