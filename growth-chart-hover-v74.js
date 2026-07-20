@@ -11,6 +11,7 @@
     y: 0,
     frame: 0
   };
+  let drawingGrowthChartV74 = false;
 
   function scheduleGrowthDraw() {
     if (hover.frame) return;
@@ -190,6 +191,9 @@
   }
 
   drawGrowthChart = function drawGrowthChartWithHoverV74(totals = calculatePortfolio()) {
+    if (drawingGrowthChartV74) return;
+    drawingGrowthChartV74 = true;
+    try {
     if (!dom.assetGrowthChart) return;
     const canvas = dom.assetGrowthChart;
     bindGrowthHover(canvas);
@@ -231,7 +235,7 @@
       ctx.font = "700 15px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("暫無歷史資料", width / 2, height / 2);
-      renderGrowthChange(NaN, NaN);
+      if (dom.growthChange) dom.growthChange.textContent = "--";
       return;
     }
 
@@ -324,7 +328,10 @@
     const lastValue = convertCurrency(points[points.length - 1].valueTwd, "TWD", state.baseCurrency);
     const change = lastValue - firstValue;
     const changePercent = firstValue > 0 ? (change / firstValue) * 100 : NaN;
-    renderGrowthChange(change, changePercent);
+    if (dom.growthChange) {
+      dom.growthChange.textContent = `${formatSensitiveCurrency(change)} ${formatPercent(changePercent)}`;
+      dom.growthChange.className = sensitiveClass(change) || valueClass(change);
+    }
 
     ctx.fillStyle = muted;
     ctx.font = "700 11px system-ui, sans-serif";
@@ -338,6 +345,9 @@
       const hoverX = clamp(hover.x, chart.left, chart.right);
       const selected = selectedGrowthPoint(coords, hoverX, yFor);
       drawGrowthTooltip(ctx, selected, chart, width, height, { text, muted, primary, danger, surface, border });
+    }
+    } finally {
+      drawingGrowthChartV74 = false;
     }
   };
 
