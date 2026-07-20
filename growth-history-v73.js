@@ -8,6 +8,9 @@
 
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
+  let isRecordingCurrentHistoryV73 = false;
+  let isRecordingPortfolioChangeV73 = false;
+  let isSubmittingPortfolioFormV73 = false;
 
   function normalizeHistoryPoint(point) {
     const date = typeof point?.date === "string" ? point.date : "";
@@ -103,7 +106,13 @@
   };
 
   recordCurrentAssetHistory = function recordCurrentAssetHistoryV73(options = {}) {
-    return recordAssetHistory(calculatePortfolio(), options);
+    if (isRecordingCurrentHistoryV73) return false;
+    isRecordingCurrentHistoryV73 = true;
+    try {
+      return recordAssetHistory(calculatePortfolio(), options);
+    } finally {
+      isRecordingCurrentHistoryV73 = false;
+    }
   };
 
   getGrowthPoints = function getGrowthPointsV73(totals) {
@@ -164,24 +173,44 @@
   }
 
   function recordBeforePortfolioChange() {
+    if (isRecordingPortfolioChangeV73) return;
+    isRecordingPortfolioChangeV73 = true;
+    try {
     const beforeLength = normalizeHistoryPoints(state.history.points).length;
     recordCurrentAssetHistory({ force: true, reason: "before-change" });
     saveIfHistoryChanged(beforeLength);
+    } finally {
+      isRecordingPortfolioChangeV73 = false;
+    }
   }
 
   function recordAfterPortfolioChange() {
+    if (isRecordingPortfolioChangeV73) return;
+    isRecordingPortfolioChangeV73 = true;
+    try {
     const beforeLength = normalizeHistoryPoints(state.history.points).length;
     recordCurrentAssetHistory({ force: true, reason: "after-change" });
     saveIfHistoryChanged(beforeLength);
     drawGrowthChart(calculatePortfolio());
+    } finally {
+      isRecordingPortfolioChangeV73 = false;
+    }
   }
 
   if (dom?.form && typeof handleSubmit === "function" && !dom.form.dataset.growthHistoryV73) {
     const originalHandleSubmit = handleSubmit;
     dom.form.removeEventListener("submit", originalHandleSubmit);
     handleSubmit = function handleSubmitWithHistoryV73(event) {
-      recordBeforePortfolioChange();
-      return originalHandleSubmit.call(this, event);
+      if (isSubmittingPortfolioFormV73) {
+        return originalHandleSubmit.call(this, event);
+      }
+      isSubmittingPortfolioFormV73 = true;
+      try {
+        recordBeforePortfolioChange();
+        return originalHandleSubmit.call(this, event);
+      } finally {
+        isSubmittingPortfolioFormV73 = false;
+      }
     };
     dom.form.addEventListener("submit", handleSubmit);
     dom.form.dataset.growthHistoryV73 = "1";
