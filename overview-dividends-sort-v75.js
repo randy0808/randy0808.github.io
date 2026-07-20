@@ -2,6 +2,7 @@
   const PATCH_KEY = "wealthtrack.dividendSort.v89";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
+  let renderingDividendSortV75 = false;
 
   const MONTHLY_SYMBOLS_V75 = new Set(["O", "SGOV", "ANGL"]);
   const KNOWN_DIVIDEND_SCHEDULES_V75 = {
@@ -736,18 +737,26 @@
 
   try {
     const previousRender = render;
+    const baseRender = previousRender.__dividendSortPreviousV75 || previousRender;
     if (!previousRender.__dividendSortV75) {
       render = function renderWithDividendSortV75() {
+        if (renderingDividendSortV75) return;
+        renderingDividendSortV75 = true;
+        try {
         const scrollTopBeforeRender = getCurrentDividendScrollTopV75();
-        previousRender();
+        baseRender();
         if (patchedNativeEntryQuickStatsV75) {
           bindDividendPayerScrollMemoryV75();
           restoreDividendPayerScrollSoonV75(scrollTopBeforeRender);
         } else {
           renderEntryQuickStatsV75(scrollTopBeforeRender);
         }
+        } finally {
+          renderingDividendSortV75 = false;
+        }
       };
       render.__dividendSortV75 = true;
+      render.__dividendSortPreviousV75 = baseRender;
     }
   } catch (error) {
     console.warn("Dividend sort render hook failed", error);
