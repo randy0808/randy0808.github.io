@@ -44,6 +44,20 @@
   margin-bottom: 0;
 }
 
+.holdings-entry-wrap {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.holdings-entry-wrap .asset-entry-panel {
+  margin: 0;
+}
+
+.holdings-entry-wrap + .holdings-panel {
+  margin-top: 0;
+}
+
 @media (max-width: 680px) {
   .dashboard-tabs {
     position: sticky;
