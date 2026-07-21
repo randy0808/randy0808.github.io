@@ -3752,13 +3752,13 @@ function editPosition(id) {
 }
 
 function showAssetEditor() {
-  const overviewTab = document.querySelector('[data-dashboard-tab="overview"]');
-  if (overviewTab && overviewTab.getAttribute("aria-selected") !== "true") {
-    overviewTab.click();
+  const holdingsTab = document.querySelector('[data-dashboard-tab="holdings"]');
+  if (holdingsTab && holdingsTab.getAttribute("aria-selected") !== "true") {
+    holdingsTab.click();
   }
 
   window.requestAnimationFrame(() => {
-    const target = dom.form.closest(".tool-card") || dom.form;
+    const target = dom.form.closest(".asset-entry-panel") || dom.form;
     target?.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
       dom.assetSymbol.focus({ preventScroll: true });
