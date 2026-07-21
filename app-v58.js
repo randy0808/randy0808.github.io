@@ -6,7 +6,7 @@
 
   if (originalRegister) {
     serviceWorker.register = (url, options) => {
-      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v108.js");
+      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v109.js");
       return originalRegister(nextUrl, options);
     };
   }
@@ -64,6 +64,7 @@
     const holdingsEntryWrap = document.createElement("div");
     holdingsEntryWrap.className = "holdings-entry-wrap";
     if (assetEntryPanel) {
+      assetEntryPanel.closest(".workspace-column")?.classList.add("workspace-column-dividend-only");
       holdingsEntryWrap.append(assetEntryPanel);
     }
 
@@ -132,10 +133,10 @@
       document.head.appendChild(stylesheet);
     }
 
-    if (!document.querySelector('link[href="overview-dividends-v69.css"]')) {
+    if (!document.querySelector('link[href^="overview-dividends-v69.css"]')) {
       const stylesheet = document.createElement("link");
       stylesheet.rel = "stylesheet";
-      stylesheet.href = "overview-dividends-v69.css";
+      stylesheet.href = "overview-dividends-v69.css?v=109";
       document.head.appendChild(stylesheet);
     }
 
@@ -163,10 +164,10 @@
   }
 
   ensureV58Layout();
-  loadScript("app-v47.js?v=108")
-    .then(() => loadScript("growth-history-v73.js?v=108"))
-    .then(() => loadScript("growth-chart-hover-v74.js?v=108"))
-    .then(() => loadScript("overview-dividends-sort-v75.js?v=108"))
-    .then(() => loadScript("holdings-sticky-v65.js?v=108"))
+  loadScript("app-v47.js?v=109")
+    .then(() => loadScript("growth-history-v73.js?v=109"))
+    .then(() => loadScript("growth-chart-hover-v74.js?v=109"))
+    .then(() => loadScript("overview-dividends-sort-v75.js?v=109"))
+    .then(() => loadScript("holdings-sticky-v65.js?v=109"))
     .catch((error) => console.warn("WealthTrack v58 patch failed", error));
 })();
