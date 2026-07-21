@@ -6,7 +6,7 @@
 
   if (originalRegister) {
     serviceWorker.register = (url, options) => {
-      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v107.js");
+      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v108.js");
       return originalRegister(nextUrl, options);
     };
   }
@@ -16,6 +16,7 @@
     const summaryGrid = document.querySelector(".summary-grid");
     const workspaceGrid = document.querySelector(".workspace-grid");
     const holdingsPanel = document.querySelector(".holdings-panel");
+    const assetEntryPanel = document.querySelector(".asset-entry-panel");
     if (!main || !summaryGrid || !workspaceGrid || !holdingsPanel || document.querySelector(".dashboard-tabs")) return;
 
     const tabs = document.createElement("section");
@@ -60,10 +61,19 @@
     `;
     watchlistTabPanel.append(watchlistPanel);
 
+    const holdingsEntryWrap = document.createElement("div");
+    holdingsEntryWrap.className = "holdings-entry-wrap";
+    if (assetEntryPanel) {
+      holdingsEntryWrap.append(assetEntryPanel);
+    }
+
     main.insertBefore(tabs, summaryGrid);
     main.insertBefore(overviewPanel, summaryGrid);
     overviewPanel.append(summaryGrid, workspaceGrid);
     main.insertBefore(holdingsTabPanel, overviewPanel.nextSibling);
+    if (assetEntryPanel) {
+      holdingsTabPanel.append(holdingsEntryWrap);
+    }
     holdingsTabPanel.append(holdingsPanel);
     main.insertBefore(watchlistTabPanel, holdingsTabPanel.nextSibling);
 
@@ -115,10 +125,10 @@
       document.head.appendChild(stylesheet);
     }
 
-    if (!document.querySelector('link[href="dashboard-tabs-v58.css"]')) {
+    if (!document.querySelector('link[href^="dashboard-tabs-v58.css"]')) {
       const stylesheet = document.createElement("link");
       stylesheet.rel = "stylesheet";
-      stylesheet.href = "dashboard-tabs-v58.css";
+      stylesheet.href = "dashboard-tabs-v58.css?v=108";
       document.head.appendChild(stylesheet);
     }
 
@@ -153,10 +163,10 @@
   }
 
   ensureV58Layout();
-  loadScript("app-v47.js?v=107")
-    .then(() => loadScript("growth-history-v73.js?v=107"))
-    .then(() => loadScript("growth-chart-hover-v74.js?v=107"))
-    .then(() => loadScript("overview-dividends-sort-v75.js?v=107"))
-    .then(() => loadScript("holdings-sticky-v65.js?v=107"))
+  loadScript("app-v47.js?v=108")
+    .then(() => loadScript("growth-history-v73.js?v=108"))
+    .then(() => loadScript("growth-chart-hover-v74.js?v=108"))
+    .then(() => loadScript("overview-dividends-sort-v75.js?v=108"))
+    .then(() => loadScript("holdings-sticky-v65.js?v=108"))
     .catch((error) => console.warn("WealthTrack v58 patch failed", error));
 })();
