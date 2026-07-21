@@ -109,7 +109,7 @@ function loadState() {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     return {
       positions: Array.isArray(saved.positions) ? saved.positions : [],
-      quotes: saved.quotes && typeof saved.quotes === "object" ? saved.quotes : {},
+      quotes: sanitizeQuotes(saved.quotes),
       baseCurrency: saved.baseCurrency || "TWD",
       fx: saved.fx || { rates: { USD: 1, TWD: FALLBACK_USD_TWD } },
       dividends: saved.dividends || { profiles: {} },
@@ -125,6 +125,20 @@ function loadState() {
       ui: { theme: "dark" }
     };
   }
+}
+
+function isValidQuotePrice(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0;
+}
+
+function isValidQuoteObject(quote) {
+  return Boolean(quote && isValidQuotePrice(quote.price) && typeof quote.currency === "string");
+}
+
+function sanitizeQuotes(quotes = {}) {
+  if (!quotes || typeof quotes !== "object") return {};
+  return Object.fromEntries(Object.entries(quotes).filter(([, quote]) => isValidQuoteObject(quote)));
 }
 
 function findPosition() {
@@ -1430,7 +1444,7 @@ function calculatePosition(item) {
   const quote = getQuote(item);
   const quoteCurrency = quote?.currency || item.manualCurrency || state.baseCurrency;
   const price = Number(quote?.price);
-  const currentValue = Number.isFinite(price)
+  const currentValue = isValidQuotePrice(price)
     ? convertCurrency(price * Number(item.quantity || 0), quoteCurrency, state.baseCurrency)
     : NaN;
   const costCurrency = positionCostCurrency(item, quoteCurrency);
