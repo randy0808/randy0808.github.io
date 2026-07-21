@@ -461,11 +461,7 @@ function loadState() {
       state.sortMode = saved.sortMode;
     }
     if (saved.quotes && typeof saved.quotes === "object") {
-      state.quotes = Object.fromEntries(
-        Object.entries(saved.quotes).filter(([, quote]) =>
-          quote && Number.isFinite(Number(quote.price)) && typeof quote.currency === "string"
-        )
-      );
+      state.quotes = sanitizeQuotes(saved.quotes);
     }
     if (saved.fx?.rates?.USD && saved.fx?.rates?.TWD) {
       state.fx = saved.fx;
@@ -515,6 +511,7 @@ function loadState() {
 
 function saveState(options = {}) {
   const { sync = true } = options;
+  state.quotes = sanitizeQuotes(state.quotes);
   const payload = {
     positions: state.positions,
     baseCurrency: state.baseCurrency,
@@ -550,6 +547,20 @@ function saveState(options = {}) {
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   if (sync) scheduleAutoSync();
+}
+
+function isValidQuotePrice(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0;
+}
+
+function isValidQuoteObject(quote) {
+  return Boolean(quote && isValidQuotePrice(quote.price) && typeof quote.currency === "string");
+}
+
+function sanitizeQuotes(quotes = {}) {
+  if (!quotes || typeof quotes !== "object") return {};
+  return Object.fromEntries(Object.entries(quotes).filter(([, quote]) => isValidQuoteObject(quote)));
 }
 
 function uid() {
@@ -865,7 +876,7 @@ function calculatePosition(position) {
   const quoteCurrency = quote?.currency || position.manualCurrency || state.baseCurrency;
   const price = Number(quote?.price);
   const currentDividendYield = currentDividendYieldAtPrice(position, price, quoteCurrency);
-  const currentValue = Number.isFinite(price)
+  const currentValue = isValidQuotePrice(price)
     ? convertCurrency(price * position.quantity, quoteCurrency, state.baseCurrency)
     : NaN;
 
@@ -2541,7 +2552,7 @@ async function fetchFxRates() {
 }
 
 async function fetchMarketQuotes(isActive = () => true) {
-  const nextQuotes = { ...state.quotes };
+  const nextQuotes = sanitizeQuotes(state.quotes);
   state.quotes = nextQuotes;
   const cryptoIds = [...new Set(state.positions.filter((p) => p.kind === "crypto").map((p) => p.marketSymbol))];
   const stockPositions = state.positions.filter((p) => p.kind === "us-stock" || p.kind === "tw-stock");
@@ -2800,6 +2811,7 @@ function parseGoogleFinanceQuote(markdown, symbol, exchange, kind) {
   if (priceLine === -1) throw new Error(`Missing price for ${marker}`);
 
   const price = parseMoneyValue(lines[priceLine]);
+  if (!isValidQuotePrice(price)) throw new Error(`Invalid price for ${marker}`);
   const percentLine = lines.slice(priceLine + 1, priceLine + 10).find((line) => /[+-]?\d+(?:\.\d+)?%/.test(line));
   const percentMatch = percentLine?.match(/([+-]?\d+(?:\.\d+)?)%/);
   const currencyLine = lines.find((line) => /\b(USD|TWD)\b/.test(line));
@@ -2829,9 +2841,9 @@ async function fetchTwseQuote(symbol) {
   const item = data?.msgArray?.[0];
   if (!item) throw new Error("Missing TWSE quote");
 
-  const price = firstFiniteNumber(item.z, item.pz, item.y);
-  const previousClose = firstFiniteNumber(item.y);
-  if (!Number.isFinite(price)) throw new Error("Missing TWSE price");
+  const price = firstPositiveNumber(item.z, item.pz, item.y);
+  const previousClose = firstPositiveNumber(item.y);
+  if (!isValidQuotePrice(price)) throw new Error("Missing TWSE price");
 
   return {
     price,
@@ -2842,6 +2854,14 @@ async function fetchTwseQuote(symbol) {
     source: "TWSE",
     asOf: Number(item.tlong) || Date.now()
   };
+}
+
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(String(value ?? "").replaceAll(",", ""));
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return NaN;
 }
 
 function firstFiniteNumber(...values) {
@@ -2873,8 +2893,8 @@ async function fetchYahooQuote(symbol, kind) {
   const meta = result?.meta;
   if (!meta) throw new Error("Missing quote metadata");
 
-  const price = Number(meta.regularMarketPrice ?? meta.previousClose ?? meta.chartPreviousClose);
-  if (!Number.isFinite(price)) throw new Error("Missing market price");
+  const price = firstPositiveNumber(meta.regularMarketPrice, meta.previousClose, meta.chartPreviousClose);
+  if (!isValidQuotePrice(price)) throw new Error("Missing market price");
 
   const previousClose = Number(meta.chartPreviousClose ?? meta.previousClose);
   const changePercent = Number.isFinite(previousClose) && previousClose > 0
