@@ -4,8 +4,11 @@
 }
 
 .workspace-column-main.workspace-column-dividend-only {
-  height: 100%;
+  height: var(--overview-right-column-height, auto);
+  max-height: var(--overview-right-column-height, none);
   grid-template-rows: minmax(0, 1fr);
+  align-self: start;
+  overflow: hidden;
 }
 
 .workspace-column-main .dividend-panel {
@@ -17,6 +20,7 @@
 
 .workspace-column-main.workspace-column-dividend-only .dividend-panel {
   height: 100%;
+  max-height: 100%;
 }
 
 .dividend-panel .entry-quick-stats {
@@ -28,7 +32,9 @@
 
 .workspace-column-main.workspace-column-dividend-only .entry-quick-stats {
   height: 100%;
+  max-height: 100%;
   grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .portfolio-digest-panel,
@@ -41,6 +47,7 @@
   grid-template-columns: 1fr;
   align-items: stretch;
   margin-top: 0;
+  overflow: hidden;
 }
 
 .dividend-payers {
@@ -171,7 +178,7 @@
 
   .workspace-column-main.workspace-column-dividend-only .dividend-payers {
     height: 100%;
-    max-height: none;
+    max-height: 100%;
   }
 }
 
