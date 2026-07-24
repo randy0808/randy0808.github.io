@@ -1,5 +1,5 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v89";
+  const PATCH_KEY = "wealthtrack.dividendSort.v112";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
   let renderingDividendSortV75 = false;
@@ -73,14 +73,14 @@
   function ensureDividendSortStyles() {
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
-      if (!String(existing.getAttribute("href") || "").includes("v=89")) {
-        existing.href = "overview-dividends-sort-v75.css?v=89";
+      if (!String(existing.getAttribute("href") || "").includes("v=112")) {
+        existing.href = "overview-dividends-sort-v75.css?v=112";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=89";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=112";
     document.head.appendChild(stylesheet);
   }
 
@@ -697,11 +697,13 @@
       <div class="dividend-bottom-grid">
         <div class="dividend-payers">
           <div class="dividend-payer-header">
-            <button class="sort-header dividend-sort-header dividend-source-sort" type="button" data-dividend-sort-field="source" data-sort-label="主要配息來源">
-              <span>主要配息來源</span>
-              <small>${DIVIDEND_SOURCE_NOTE_V75}</small>
-              <span class="sort-indicator" aria-hidden="true"></span>
-            </button>
+            <div class="dividend-source-header">
+              <button class="sort-header dividend-sort-header dividend-source-sort" type="button" data-dividend-sort-field="source" data-sort-label="主要配息來源">
+                <span>主要配息來源</span>
+                <span class="sort-indicator" aria-hidden="true"></span>
+              </button>
+              <small class="dividend-source-note">${DIVIDEND_SOURCE_NOTE_V75}資料每日更新一次。</small>
+            </div>
             <button class="sort-header dividend-sort-header dividend-value-sort" type="button" data-dividend-sort-field="annualValue" data-sort-label="年領股息">
               年領股息<span class="sort-indicator" aria-hidden="true"></span>
             </button>
