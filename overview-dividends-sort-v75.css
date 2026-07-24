@@ -175,22 +175,33 @@
 }
 
 .dividend-payer-header .dividend-source-sort {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
   text-align: left;
 }
 
-.dividend-payer-header .dividend-source-sort small {
+.dividend-payer-header .dividend-source-header {
   min-width: 0;
-  overflow: hidden;
+  display: grid;
+  gap: 4px;
+  align-items: start;
+}
+
+.dividend-payer-header .dividend-source-note {
+  display: block;
+  min-width: 0;
+  max-width: min(100%, 46rem);
+  overflow: visible;
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 760;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .dividend-payer-header .dividend-value-sort {
@@ -242,12 +253,19 @@
   }
 
   .dividend-payer-header .dividend-source-sort {
-    grid-template-columns: auto auto;
     gap: 4px 6px;
   }
 
-  .dividend-payer-header .dividend-source-sort small {
-    display: none;
+  .dividend-payer-header .dividend-source-header {
+    grid-column: 1 / -1;
+    gap: 6px;
+    justify-items: start;
+  }
+
+  .dividend-payer-header .dividend-source-note {
+    max-width: 100%;
+    font-size: 0.7rem;
+    line-height: 1.45;
   }
 
   .dividend-payer-header .dividend-value-sort,
