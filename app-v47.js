@@ -18,6 +18,9 @@ const FUNDAMENTAL_FETCH_CONCURRENCY = 4;
 const FUNDAMENTAL_FETCH_DELAY_MS = 80;
 const FUNDAMENTAL_FETCH_TIMEOUT_MS = 28_000;
 const ASSET_STOCK_PB_THRESHOLD = 0.8;
+const ASSET_STOCK_PB_EXCEPTION_RULES = {
+  "BRK-B": { threshold: 1.2, label: "BRK例外" }
+};
 const HISTORY_START_DATE = "2026-07-10";
 const HISTORY_MAX_POINTS = 2_500;
 const HISTORY_MIN_POINT_GAP_MS = 60_000;
@@ -949,31 +952,45 @@ function isAssetStockAlertCandidate(position) {
   return isFundamentalAlertCandidate(position);
 }
 
+function getAssetStockPbRule(position) {
+  const key = normalizeSecTicker(position?.marketSymbol || position?.symbol);
+  return ASSET_STOCK_PB_EXCEPTION_RULES[key] || { threshold: ASSET_STOCK_PB_THRESHOLD, label: "" };
+}
+
+function buildAssetStockAlertRow(position) {
+  const metrics = calculatePosition(position);
+  const profile = state.fundamentals.profiles[fundamentalKey(position)];
+  const quotePrice = Number(metrics.quote?.price);
+  const quoteCurrency = metrics.quoteCurrency || (position.kind === "tw-stock" ? "TWD" : "USD");
+  const bookCurrency = profile?.currency || quoteCurrency;
+  const bookValue = convertCurrency(Number(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
+  const computedPriceToBook = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(bookValue) && bookValue > 0
+    ? quotePrice / bookValue
+    : NaN;
+  const pbRule = getAssetStockPbRule(position);
+  return {
+    position,
+    metrics,
+    profile,
+    bookValue,
+    priceToBook: firstPositiveNumber(computedPriceToBook, profile?.priceToBook),
+    pbThreshold: pbRule.threshold,
+    pbRuleLabel: pbRule.label
+  };
+}
+
+function assetStockRowHasValidPriceToBook(row) {
+  return Boolean(row && Number.isFinite(row.priceToBook) && row.priceToBook > 0);
+}
+
 function getAssetStockAlertRows() {
   return state.positions
     .filter(isAssetStockAlertCandidate)
-    .map((position) => {
-      const metrics = calculatePosition(position);
-      const profile = state.fundamentals.profiles[fundamentalKey(position)];
-      const quotePrice = Number(metrics.quote?.price);
-      const quoteCurrency = metrics.quoteCurrency || (position.kind === "tw-stock" ? "TWD" : "USD");
-      const bookCurrency = profile?.currency || quoteCurrency;
-      const bookValue = convertCurrency(Number(profile?.bookValuePerShare), bookCurrency, quoteCurrency);
-      const computedPriceToBook = Number.isFinite(quotePrice) && quotePrice > 0 && Number.isFinite(bookValue) && bookValue > 0
-        ? quotePrice / bookValue
-        : NaN;
-      return {
-        position,
-        metrics,
-        profile,
-        bookValue,
-        priceToBook: firstFiniteNumber(computedPriceToBook, profile?.priceToBook)
-      };
-    })
-    .filter(({ profile, priceToBook }) =>
-      fundamentalProfileCanDisplay(profile)
-      && Number.isFinite(priceToBook)
-      && priceToBook <= ASSET_STOCK_PB_THRESHOLD
+    .map(buildAssetStockAlertRow)
+    .filter((row) =>
+      fundamentalProfileCanDisplay(row.profile)
+      && assetStockRowHasValidPriceToBook(row)
+      && row.priceToBook <= row.pbThreshold
     )
     .sort((a, b) => a.priceToBook - b.priceToBook);
 }
@@ -1055,6 +1072,37 @@ function getFundamentalAlertStats(predicate) {
         reason: getFundamentalMissingReason(profile)
       });
     }
+  });
+  const missing = missingSymbols.length;
+  return {
+    total: positions.length,
+    ready,
+    errors: missing,
+    missing,
+    missingSymbols,
+    missingDetails
+  };
+}
+
+function getAssetStockAlertStats() {
+  const positions = state.positions.filter(isAssetStockAlertCandidate);
+  let ready = 0;
+  const missingSymbols = [];
+  const missingDetails = [];
+  positions.forEach((position) => {
+    const row = buildAssetStockAlertRow(position);
+    if (fundamentalProfileCanDisplay(row.profile) && assetStockRowHasValidPriceToBook(row)) {
+      ready += 1;
+      return;
+    }
+    const symbol = position.symbol || position.marketSymbol || "未知";
+    missingSymbols.push(symbol);
+    missingDetails.push({
+      symbol,
+      reason: fundamentalProfileCanDisplay(row.profile)
+        ? "P/B 無效或每股帳面價值缺資料"
+        : getFundamentalMissingReason(row.profile)
+    });
   });
   const missing = missingSymbols.length;
   return {
@@ -1533,10 +1581,10 @@ function renderYieldAlerts() {
       <span>${formatPlainPercent(metrics.currentDividendYield, 2)}</span>
     </span>
   `).join("");
-  const assetStockItems = assetStockAlerts.map(({ position, priceToBook }) => `
+  const assetStockItems = assetStockAlerts.map(({ position, priceToBook, pbRuleLabel }) => `
     <span class="yield-alert-chip">
       <strong>${escapeHtml(position.symbol)}</strong>
-      <span>P/B ${formatNumber(priceToBook, 2)}</span>
+      <span>P/B ${formatNumber(priceToBook, 2)}${pbRuleLabel ? ` ${escapeHtml(pbRuleLabel)}` : ""}</span>
     </span>
   `).join("");
   const assetStockStatus = state.fundamentals.isRefreshing
@@ -1573,7 +1621,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，${assetStockStatus}</span>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}，BRK.B 例外 <= ${formatNumber(ASSET_STOCK_PB_EXCEPTION_RULES["BRK-B"].threshold, 1)}，${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${state.fundamentals.isRefreshing ? "正在搜尋符合條件的資產股" : "目前沒有符合條件"}</span>`}</div>
     </div>
@@ -1590,7 +1638,7 @@ function renderYieldAlerts() {
   const growthAlerts = getGrowthStockAlertRows();
   const assetStockAlerts = getAssetStockAlertRows();
   const growthStats = getFundamentalAlertStats(isGrowthStockAlertCandidate);
-  const assetStockStats = getFundamentalAlertStats(isAssetStockAlertCandidate);
+  const assetStockStats = getAssetStockAlertStats();
   const permission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   const alertItems = alerts.map(({ position, metrics }) => `
     <span class="yield-alert-chip">
@@ -1612,10 +1660,10 @@ function renderYieldAlerts() {
       </span>
     `;
   }).join("");
-  const assetStockItems = assetStockAlerts.map(({ position, priceToBook }) => `
+  const assetStockItems = assetStockAlerts.map(({ position, priceToBook, pbRuleLabel }) => `
     <span class="yield-alert-chip">
       <strong>${escapeHtml(position.symbol)}</strong>
-      <span>P/B ${formatNumber(priceToBook, 2)}</span>
+      <span>P/B ${formatNumber(priceToBook, 2)}${pbRuleLabel ? ` ${escapeHtml(pbRuleLabel)}` : ""}</span>
     </span>
   `).join("");
   const growthStatus = formatFundamentalAlertStatus(growthStats, "等待檢查成長股");
@@ -1649,7 +1697,7 @@ function renderYieldAlerts() {
     <div class="stock-alert-card">
       <div class="stock-alert-main">
         <strong>資產股提醒</strong>
-        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}；${assetStockStatus}</span>
+        <span>P/B <= ${formatNumber(ASSET_STOCK_PB_THRESHOLD, 1)}；BRK.B 例外 <= ${formatNumber(ASSET_STOCK_PB_EXCEPTION_RULES["BRK-B"].threshold, 1)}；${assetStockStatus}</span>
       </div>
       <div class="yield-alert-list">${assetStockItems || `<span class="stock-alert-empty">${formatFundamentalEmptyText(assetStockStats, "正在檢查每股帳面價值")}</span>`}</div>
     </div>
