@@ -6,7 +6,7 @@
 
   if (originalRegister) {
     serviceWorker.register = (url, options) => {
-      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v109.js");
+      const nextUrl = String(url || "").replace("service-worker-v47.js", "service-worker-v110.js");
       return originalRegister(nextUrl, options);
     };
   }
@@ -115,6 +115,57 @@
     setActiveTab(panels[queryTab] ? queryTab : storedTab || "overview");
   }
 
+  let dividendHeightObserver = null;
+  let dividendHeightFrame = 0;
+
+  function syncOverviewDividendHeight() {
+    const grid = document.querySelector("#overviewTabPanel .workspace-grid") || document.querySelector(".workspace-grid");
+    const overviewPanel = document.querySelector("#overviewTabPanel");
+    const leftColumn = grid?.querySelector(".workspace-column-main");
+    const rightColumn = [...(grid?.children || [])].find((element) => element !== leftColumn && element.classList?.contains("workspace-column"));
+
+    if (!grid || !leftColumn || !rightColumn || (overviewPanel && overviewPanel.hidden)) return;
+
+    if (!window.matchMedia("(min-width: 1101px)").matches) {
+      leftColumn.style.removeProperty("--overview-right-column-height");
+      return;
+    }
+
+    const rightHeight = Math.ceil(rightColumn.getBoundingClientRect().height);
+    if (rightHeight > 0) {
+      leftColumn.style.setProperty("--overview-right-column-height", `${rightHeight}px`);
+    }
+  }
+
+  function scheduleOverviewDividendHeightSync() {
+    if (dividendHeightFrame) return;
+    dividendHeightFrame = requestAnimationFrame(() => {
+      dividendHeightFrame = 0;
+      syncOverviewDividendHeight();
+    });
+  }
+
+  function ensureOverviewDividendHeightSync() {
+    if (dividendHeightObserver) {
+      scheduleOverviewDividendHeightSync();
+      return;
+    }
+
+    const grid = document.querySelector("#overviewTabPanel .workspace-grid") || document.querySelector(".workspace-grid");
+    const leftColumn = grid?.querySelector(".workspace-column-main");
+    const rightColumn = [...(grid?.children || [])].find((element) => element !== leftColumn && element.classList?.contains("workspace-column"));
+
+    if ("ResizeObserver" in window) {
+      dividendHeightObserver = new ResizeObserver(scheduleOverviewDividendHeightSync);
+      if (rightColumn) dividendHeightObserver.observe(rightColumn);
+    } else {
+      dividendHeightObserver = { observe() {} };
+    }
+
+    window.addEventListener("resize", scheduleOverviewDividendHeightSync, { passive: true });
+    scheduleOverviewDividendHeightSync();
+  }
+
   function ensureV58Layout() {
     const workspaceColumn = document.querySelector(".workspace-grid .workspace-column");
     workspaceColumn?.classList.add("workspace-column-main");
@@ -136,7 +187,7 @@
     if (!document.querySelector('link[href^="overview-dividends-v69.css"]')) {
       const stylesheet = document.createElement("link");
       stylesheet.rel = "stylesheet";
-      stylesheet.href = "overview-dividends-v69.css?v=109";
+      stylesheet.href = "overview-dividends-v69.css?v=110";
       document.head.appendChild(stylesheet);
     }
 
@@ -150,6 +201,7 @@
     document.querySelectorAll(".portfolio-digest-panel").forEach((panel) => panel.remove());
 
     ensureDashboardTabs();
+    ensureOverviewDividendHeightSync();
   }
 
   function loadScript(src) {
@@ -164,10 +216,10 @@
   }
 
   ensureV58Layout();
-  loadScript("app-v47.js?v=109")
-    .then(() => loadScript("growth-history-v73.js?v=109"))
-    .then(() => loadScript("growth-chart-hover-v74.js?v=109"))
-    .then(() => loadScript("overview-dividends-sort-v75.js?v=109"))
-    .then(() => loadScript("holdings-sticky-v65.js?v=109"))
+  loadScript("app-v47.js?v=110")
+    .then(() => loadScript("growth-history-v73.js?v=110"))
+    .then(() => loadScript("growth-chart-hover-v74.js?v=110"))
+    .then(() => loadScript("overview-dividends-sort-v75.js?v=110"))
+    .then(() => loadScript("holdings-sticky-v65.js?v=110"))
     .catch((error) => console.warn("WealthTrack v58 patch failed", error));
 })();
