@@ -1,5 +1,5 @@
 (function () {
-  const PATCH_KEY = "wealthtrack.dividendSort.v112";
+  const PATCH_KEY = "wealthtrack.dividendSort.v113";
   if (window[PATCH_KEY]) return;
   window[PATCH_KEY] = true;
   let renderingDividendSortV75 = false;
@@ -74,13 +74,13 @@
     const existing = document.querySelector('link[href^="overview-dividends-sort-v75.css"]');
     if (existing) {
       if (!String(existing.getAttribute("href") || "").includes("v=112")) {
-        existing.href = "overview-dividends-sort-v75.css?v=112";
+        existing.href = "overview-dividends-sort-v75.css?v=113";
       }
       return;
     }
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "overview-dividends-sort-v75.css?v=112";
+    stylesheet.href = "overview-dividends-sort-v75.css?v=113";
     document.head.appendChild(stylesheet);
   }
 
