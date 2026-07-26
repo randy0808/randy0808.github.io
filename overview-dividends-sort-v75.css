@@ -28,10 +28,24 @@
   overflow: visible;
 }
 
+.dividend-month-grid {
+  align-items: start;
+}
+
 .dividend-month-card {
   position: relative;
   z-index: 1;
+  align-content: start;
+  justify-items: stretch;
+  grid-auto-rows: max-content;
+  height: auto;
   cursor: default;
+}
+
+.dividend-month-card > span:first-child,
+.dividend-month-card > strong,
+.dividend-month-card > .dividend-month-bar {
+  width: 100%;
 }
 
 .dividend-month-card:focus {
@@ -217,13 +231,65 @@
 }
 
 @media (max-width: 780px) {
-  .dividend-month-card {
-    min-height: 78px;
+  .dividend-month-grid {
+    align-items: start;
+    grid-auto-rows: auto;
   }
 
-  .dividend-month-tooltip {
-    width: min(340px, calc(100vw - 32px));
-    max-height: min(460px, calc(100vh - 120px));
+  .dividend-month-card {
+    min-height: 0;
+    height: auto;
+    align-self: start;
+    align-content: start;
+    grid-template-rows: auto auto auto auto;
+    gap: 8px;
+  }
+
+  .dividend-month-card > .dividend-month-tooltip {
+    position: static;
+    display: block !important;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    transition: none;
+  }
+
+  .dividend-month-card > .dividend-month-tooltip .dividend-month-tooltip-title {
+    margin: 4px 0 0;
+    padding: 0;
+    border-bottom: 0;
+    font-size: 0.82rem;
+  }
+
+  .dividend-month-card > .dividend-month-tooltip .dividend-month-tooltip-hint {
+    display: block;
+    margin-top: 2px;
+    line-height: 1.35;
+  }
+
+  .dividend-month-card > .dividend-month-tooltip .dividend-month-tooltip-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    margin-top: 6px;
+    display: grid;
+    gap: 2px;
+  }
+
+  .dividend-month-card > .dividend-month-tooltip .dividend-month-tooltip-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    font-size: 0.82rem;
+    line-height: 1.25;
   }
 
   .dividend-month-floating-tooltip {
