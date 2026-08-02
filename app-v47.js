@@ -6,7 +6,7 @@ const REFRESH_MS = 30_000;
 const REFRESH_STUCK_MS = 90_000;
 const REFRESH_CLICK_FEEDBACK_MS = 2_000;
 const AUTO_SYNC_DEBOUNCE_MS = 2_500;
-const CLOUD_PULL_MS = 15_000;
+const CLOUD_PULL_MS = 10_000;
 const CLOUD_STARTUP_SYNC_DELAY_MS = 3_000;
 const STOCK_QUOTE_CONCURRENCY = 1;
 const STOCK_QUOTE_DELAY_MS = 1_800;
@@ -241,7 +241,9 @@ const state = {
     lastRemoteUpdatedAt: null,
     lastAutoPullAt: null,
     localUpdatedAt: null,
+    localUserUpdatedAt: null,
     lastHash: "",
+    lastUserHash: "",
     status: "",
     busy: false
   },
@@ -504,7 +506,9 @@ function loadState() {
         lastRemoteUpdatedAt: saved.cloud.lastRemoteUpdatedAt || null,
         lastAutoPullAt: saved.cloud.lastAutoPullAt || null,
         localUpdatedAt: saved.cloud.localUpdatedAt || null,
-        lastHash: typeof saved.cloud.lastHash === "string" ? saved.cloud.lastHash : ""
+        localUserUpdatedAt: saved.cloud.localUserUpdatedAt || null,
+        lastHash: typeof saved.cloud.lastHash === "string" ? saved.cloud.lastHash : "",
+        lastUserHash: typeof saved.cloud.lastUserHash === "string" ? saved.cloud.lastUserHash : ""
       };
       if (state.cloud.token && !saved.cloud.autoSync) state.cloud.autoSync = true;
     }
@@ -524,9 +528,6 @@ function loadState() {
 function saveState(options = {}) {
   const { sync = true } = options;
   state.quotes = sanitizeQuotes(state.quotes);
-  if (sync && portfolioSyncHash() !== state.cloud.lastHash) {
-    state.cloud.localUpdatedAt = Date.now();
-  }
   const payload = {
     positions: state.positions,
     baseCurrency: state.baseCurrency,
@@ -554,7 +555,9 @@ function saveState(options = {}) {
       lastRemoteUpdatedAt: state.cloud.lastRemoteUpdatedAt,
       lastAutoPullAt: state.cloud.lastAutoPullAt,
       localUpdatedAt: state.cloud.localUpdatedAt,
-      lastHash: state.cloud.lastHash
+      localUserUpdatedAt: state.cloud.localUserUpdatedAt,
+      lastHash: state.cloud.lastHash,
+      lastUserHash: state.cloud.lastUserHash
     },
     ui: {
       privacyMask: state.ui.privacyMask,
@@ -1262,6 +1265,7 @@ function getGrowthPoints(totals) {
 function setGrowthRange(range) {
   if (range !== "since" && !Object.prototype.hasOwnProperty.call(HISTORY_RANGE_DAYS, range)) return;
   state.history.range = range;
+  markUserDataChanged();
   saveState();
   drawGrowthChart(calculatePortfolio());
 }
@@ -2306,6 +2310,7 @@ function setSortField(field) {
   const defaultDirection = SORT_DEFAULT_DIRECTIONS[field] || "desc";
   const direction = current.field === field ? (current.direction === "asc" ? "desc" : "asc") : defaultDirection;
   state.sortMode = `${field}-${direction}`;
+  markUserDataChanged();
   saveState();
   renderRows();
   updateSortButtons();
@@ -2575,7 +2580,7 @@ async function refreshPrices(options = {}) {
     if (runId !== activeRefreshRunId) return;
     state.lastSync = Date.now();
     recordAssetHistory(calculatePortfolio());
-    saveState();
+    saveState({ sync: false });
   } finally {
     if (runId === activeRefreshRunId) {
       state.isRefreshing = false;
@@ -3783,6 +3788,7 @@ function handleSubmit(event) {
     }
 
     recordCurrentAssetHistory({ force: true });
+    markUserDataChanged();
     saveState();
     resetForm();
     render();
@@ -3839,6 +3845,7 @@ function deletePosition(id) {
   delete state.dividends.profiles[dividendKey(position)];
   delete state.fundamentals.profiles[fundamentalKey(position)];
   recordCurrentAssetHistory({ force: true });
+  markUserDataChanged();
   saveState();
   render();
   refreshDividendProfiles();
@@ -4297,8 +4304,40 @@ function portfolioSyncData() {
   };
 }
 
+function portfolioUserData(source = state) {
+  const ui = source.ui || {};
+  const history = source.history || {};
+  return {
+    baseCurrency: source.baseCurrency,
+    sortMode: source.sortMode,
+    ui: {
+      privacyMask: Boolean(ui.privacyMask),
+      columnOrder: normalizeColumnOrder(ui.columnOrder),
+      theme: ui.theme === "light" ? "light" : "dark"
+    },
+    history: {
+      range: Object.prototype.hasOwnProperty.call(HISTORY_RANGE_DAYS, history.range) || history.range === "since"
+        ? history.range
+        : "since"
+    },
+    positions: Array.isArray(source.positions)
+      ? source.positions.map(normalizeImportedPosition).filter(Boolean)
+      : []
+  };
+}
+
 function portfolioSyncHash() {
   return JSON.stringify(portfolioSyncData());
+}
+
+function portfolioUserHash(source = state) {
+  return JSON.stringify(portfolioUserData(source));
+}
+
+function markUserDataChanged() {
+  const now = Date.now();
+  state.cloud.localUpdatedAt = now;
+  state.cloud.localUserUpdatedAt = now;
 }
 
 function hasCloudCredentials() {
@@ -4312,8 +4351,45 @@ function enableCloudAutoSyncIfPossible() {
 }
 
 function hasLocalCloudChanges() {
-  if (!state.positions.length || !state.cloud.lastHash) return false;
-  return portfolioSyncHash() !== state.cloud.lastHash;
+  if (!state.positions.length && !state.cloud.lastUserHash && !state.cloud.localUserUpdatedAt) return false;
+  if (!state.cloud.lastUserHash) return Boolean(state.cloud.localUserUpdatedAt);
+  return portfolioUserHash() !== state.cloud.lastUserHash;
+}
+
+function payloadUserHash(payload) {
+  if (payload && typeof payload.userHash === "string" && payload.userHash) return payload.userHash;
+  return JSON.stringify(portfolioUserData({
+    baseCurrency: payload?.baseCurrency,
+    sortMode: payload?.sortMode,
+    ui: payload?.ui,
+    history: payload?.history,
+    positions: payload?.positions
+  }));
+}
+
+function positionCreatedTime(position) {
+  const created = Date.parse(position?.createdAt || "");
+  return Number.isFinite(created) ? created : 0;
+}
+
+function legacyCloudShouldPreferLocal(payload) {
+  if (state.cloud.lastUserHash) return false;
+  if (!state.positions.length || !Array.isArray(payload?.positions) || !payload.positions.length) return false;
+  if (portfolioUserHash() === payloadUserHash(payload)) return false;
+
+  const localIds = new Set(state.positions.map((position) => position.id).filter(Boolean));
+  const remoteIds = new Set(payload.positions.map((position) => position.id).filter(Boolean));
+  const localOnly = state.positions.filter((position) => position.id && !remoteIds.has(position.id));
+  const remoteOnly = payload.positions.filter((position) => position.id && !localIds.has(position.id));
+  const localMaxCreatedAt = Math.max(0, ...state.positions.map(positionCreatedTime));
+  const remoteHasNewerAddition = remoteOnly.some((position) => positionCreatedTime(position) > localMaxCreatedAt + 60_000);
+
+  if (remoteHasNewerAddition) return false;
+  if (localOnly.length || remoteOnly.length) return true;
+
+  const localTime = Number(state.cloud.localUpdatedAt || 0);
+  const remoteTime = cloudPayloadTime(payload);
+  return localTime >= remoteTime;
 }
 
 function cloudPayloadTime(payload) {
@@ -4329,8 +4405,9 @@ function lastKnownRemoteTime() {
 function buildCloudPayload() {
   return {
     app: "wealthtrack",
-    version: 3,
+    version: 4,
     updatedAt: new Date().toISOString(),
+    userHash: portfolioUserHash(),
     ...portfolioSyncData()
   };
 }
@@ -4409,14 +4486,26 @@ async function autoPullCloudSync(options = {}) {
     const payload = await readCloudPayload(gist);
     const remoteTime = cloudPayloadTime(payload);
     const lastRemoteTime = lastKnownRemoteTime();
+    const remoteUserHash = payloadUserHash(payload);
+    const localChanged = hasLocalCloudChanges();
+    const remoteChanged = state.cloud.lastUserHash
+      ? remoteUserHash !== state.cloud.lastUserHash
+      : remoteTime > lastRemoteTime;
+    const localUserTime = Number(state.cloud.localUserUpdatedAt || 0);
 
-    if (hasLocalCloudChanges()) {
+    if (!state.cloud.lastUserHash && legacyCloudShouldPreferLocal(payload)) {
       state.cloud.busy = false;
       await uploadCloudSync({ silent: true });
       return true;
     }
 
-    if ((!state.positions.length && payload.positions.length) || remoteTime > lastRemoteTime) {
+    if (localChanged && (!remoteChanged || localUserTime >= remoteTime)) {
+      state.cloud.busy = false;
+      await uploadCloudSync({ silent: true });
+      return true;
+    }
+
+    if ((!state.positions.length && payload.positions.length) || remoteChanged) {
       applyCloudPayload(payload);
       state.cloud.status = "已自動下載最新資料";
       saveState({ sync: false });
@@ -4424,6 +4513,7 @@ async function autoPullCloudSync(options = {}) {
       return true;
     }
 
+    if (!state.cloud.lastUserHash) state.cloud.lastUserHash = remoteUserHash;
     state.cloud.lastPulledAt = Date.now();
     state.cloud.status = "雲端資料已是最新";
     saveState({ sync: false });
@@ -4541,6 +4631,7 @@ async function readCloudPayload(gist) {
 }
 
 function applyCloudPayload(payload) {
+  const remoteUserHash = payloadUserHash(payload);
   state.positions = payload.positions.map(normalizeImportedPosition).filter(Boolean);
   if (payload.baseCurrency === "USD" || payload.baseCurrency === "TWD") {
     state.baseCurrency = payload.baseCurrency;
@@ -4562,6 +4653,8 @@ function applyCloudPayload(payload) {
   state.cloud.lastPulledAt = Date.now();
   state.cloud.lastRemoteUpdatedAt = payload.updatedAt || null;
   state.cloud.lastHash = portfolioSyncHash();
+  state.cloud.lastUserHash = remoteUserHash;
+  state.cloud.localUserUpdatedAt = null;
   saveState({ sync: false });
   resetForm();
   render();
@@ -4592,6 +4685,8 @@ async function uploadCloudSync(options = {}) {
     state.cloud.lastPushedAt = Date.now();
     state.cloud.lastRemoteUpdatedAt = payload.updatedAt;
     state.cloud.lastHash = portfolioSyncHash();
+    state.cloud.lastUserHash = portfolioUserHash();
+    state.cloud.localUserUpdatedAt = null;
     state.cloud.status = silent ? "已自動上傳" : "已上傳雲端";
     saveState({ sync: false });
     renderCloudSync();
@@ -4615,23 +4710,25 @@ async function downloadCloudSync(options = {}) {
     if (!gist) throw new Error("找不到同步檔，請先在有資料的裝置按上傳雲端");
     state.cloud.gistId = gist.id;
     const payload = await readCloudPayload(gist);
-    const remoteTime = payload.updatedAt ? Date.parse(payload.updatedAt) : 0;
-    const lastRemoteTime = state.cloud.lastRemoteUpdatedAt ? Date.parse(state.cloud.lastRemoteUpdatedAt) : 0;
-    const localChanged = Boolean(state.positions.length) && state.cloud.lastHash && portfolioSyncHash() !== state.cloud.lastHash;
+    const remoteTime = cloudPayloadTime(payload);
+    const lastRemoteTime = lastKnownRemoteTime();
+    const remoteUserHash = payloadUserHash(payload);
+    const remoteChanged = state.cloud.lastUserHash ? remoteUserHash !== state.cloud.lastUserHash : remoteTime > lastRemoteTime;
+    const localChanged = hasLocalCloudChanges();
 
-    if (!overwrite && state.positions.length && !state.cloud.lastHash) {
+    if (!overwrite && state.positions.length && !state.cloud.lastUserHash) {
       state.cloud.status = "請手動選擇上傳或下載";
       saveState({ sync: false });
       renderCloudSync();
       return;
     }
-    if (!overwrite && localChanged && remoteTime > lastRemoteTime) {
+    if (!overwrite && localChanged && remoteChanged && remoteTime > Number(state.cloud.localUserUpdatedAt || 0)) {
       state.cloud.status = "雲端與本機都有變更";
       saveState({ sync: false });
       renderCloudSync();
       return;
     }
-    if (!overwrite && remoteTime <= lastRemoteTime && state.positions.length) {
+    if (!overwrite && !remoteChanged && state.positions.length) {
       state.cloud.status = "已是最新";
       saveState({ sync: false });
       renderCloudSync();
@@ -4695,6 +4792,7 @@ function renderColumnSettings() {
 
 function setPrivacyMask(enabled) {
   state.ui.privacyMask = Boolean(enabled);
+  markUserDataChanged();
   saveState();
   render();
 }
@@ -4707,12 +4805,14 @@ function moveColumn(columnId, direction) {
   if (nextIndex < 0 || nextIndex >= order.length) return;
   [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
   state.ui.columnOrder = order;
+  markUserDataChanged();
   saveState();
   render();
 }
 
 function resetColumnOrder() {
   state.ui.columnOrder = [...DEFAULT_COLUMN_ORDER];
+  markUserDataChanged();
   saveState();
   render();
 }
@@ -4734,6 +4834,7 @@ function renderThemeSettings() {
 
 function setTheme(theme) {
   state.ui.theme = theme === "light" ? "light" : "dark";
+  markUserDataChanged();
   saveState();
   render();
 }
@@ -4745,6 +4846,7 @@ function reorderColumnBefore(sourceId, targetId) {
   if (targetIndex === -1) return;
   order.splice(targetIndex, 0, sourceId);
   state.ui.columnOrder = order;
+  markUserDataChanged();
   saveState();
   render();
 }
@@ -4874,6 +4976,7 @@ function bindEvents() {
   dom.baseButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.baseCurrency = button.dataset.baseCurrency;
+      markUserDataChanged();
       saveState();
       render();
       refreshPrices();
