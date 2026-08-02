@@ -6,6 +6,8 @@ const REFRESH_MS = 30_000;
 const REFRESH_STUCK_MS = 90_000;
 const REFRESH_CLICK_FEEDBACK_MS = 2_000;
 const AUTO_SYNC_DEBOUNCE_MS = 2_500;
+const CLOUD_PULL_MS = 15_000;
+const CLOUD_STARTUP_SYNC_DELAY_MS = 3_000;
 const STOCK_QUOTE_CONCURRENCY = 1;
 const STOCK_QUOTE_DELAY_MS = 1_800;
 const DIVIDEND_CACHE_MS = 24 * 60 * 60 * 1000;
@@ -237,6 +239,8 @@ const state = {
     lastPulledAt: null,
     lastPushedAt: null,
     lastRemoteUpdatedAt: null,
+    lastAutoPullAt: null,
+    localUpdatedAt: null,
     lastHash: "",
     status: "",
     busy: false
@@ -254,6 +258,8 @@ let refreshClickFeedbackTimer = null;
 let secTickerMapPromise = null;
 
 let autoSyncTimer = null;
+let cloudPullTimer = null;
+let cloudStartupTimer = null;
 
 const SORT_DEFAULT_DIRECTIONS = {
   asset: "asc",
@@ -496,8 +502,11 @@ function loadState() {
         lastPulledAt: saved.cloud.lastPulledAt || null,
         lastPushedAt: saved.cloud.lastPushedAt || null,
         lastRemoteUpdatedAt: saved.cloud.lastRemoteUpdatedAt || null,
+        lastAutoPullAt: saved.cloud.lastAutoPullAt || null,
+        localUpdatedAt: saved.cloud.localUpdatedAt || null,
         lastHash: typeof saved.cloud.lastHash === "string" ? saved.cloud.lastHash : ""
       };
+      if (state.cloud.token && !saved.cloud.autoSync) state.cloud.autoSync = true;
     }
     if (saved.ui && typeof saved.ui === "object") {
       state.ui.privacyMask = Boolean(saved.ui.privacyMask);
@@ -515,6 +524,9 @@ function loadState() {
 function saveState(options = {}) {
   const { sync = true } = options;
   state.quotes = sanitizeQuotes(state.quotes);
+  if (sync && portfolioSyncHash() !== state.cloud.lastHash) {
+    state.cloud.localUpdatedAt = Date.now();
+  }
   const payload = {
     positions: state.positions,
     baseCurrency: state.baseCurrency,
@@ -540,6 +552,8 @@ function saveState(options = {}) {
       lastPulledAt: state.cloud.lastPulledAt,
       lastPushedAt: state.cloud.lastPushedAt,
       lastRemoteUpdatedAt: state.cloud.lastRemoteUpdatedAt,
+      lastAutoPullAt: state.cloud.lastAutoPullAt,
+      localUpdatedAt: state.cloud.localUpdatedAt,
       lastHash: state.cloud.lastHash
     },
     ui: {
@@ -4176,8 +4190,12 @@ function handleExport(format) {
 function getCloudSettingsFromForm() {
   const token = dom.syncToken.value.trim();
   if (token) state.cloud.token = token;
-  state.cloud.gistId = dom.syncGistId.value.trim();
-  state.cloud.autoSync = dom.syncAuto.checked;
+  const gistId = dom.syncGistId.value.trim();
+  if (gistId || document.activeElement === dom.syncGistId) {
+    state.cloud.gistId = gistId;
+  }
+  state.cloud.autoSync = Boolean(state.cloud.token);
+  dom.syncAuto.checked = state.cloud.autoSync;
 }
 
 function encodeDeviceSyncPayload(payload) {
@@ -4283,6 +4301,31 @@ function portfolioSyncHash() {
   return JSON.stringify(portfolioSyncData());
 }
 
+function hasCloudCredentials() {
+  return Boolean(state.cloud.token || dom.syncToken?.value?.trim());
+}
+
+function enableCloudAutoSyncIfPossible() {
+  if (!state.cloud.token) return;
+  state.cloud.autoSync = true;
+  if (dom.syncAuto) dom.syncAuto.checked = true;
+}
+
+function hasLocalCloudChanges() {
+  if (!state.positions.length || !state.cloud.lastHash) return false;
+  return portfolioSyncHash() !== state.cloud.lastHash;
+}
+
+function cloudPayloadTime(payload) {
+  const parsed = payload?.updatedAt ? Date.parse(payload.updatedAt) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function lastKnownRemoteTime() {
+  const parsed = state.cloud.lastRemoteUpdatedAt ? Date.parse(state.cloud.lastRemoteUpdatedAt) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function buildCloudPayload() {
   return {
     app: "wealthtrack",
@@ -4329,16 +4372,96 @@ function renderCloudSync() {
 }
 
 function scheduleAutoSync() {
-  if (!state.cloud.autoSync || !state.cloud.token || state.cloud.busy) return;
-  const hash = portfolioSyncHash();
-  if (hash === state.cloud.lastHash) return;
+  enableCloudAutoSyncIfPossible();
+  if (!state.cloud.autoSync || !hasCloudCredentials() || state.cloud.busy) return;
+  if (!hasLocalCloudChanges()) return;
   clearTimeout(autoSyncTimer);
   autoSyncTimer = setTimeout(() => {
     uploadCloudSync({ silent: true }).catch((error) => {
       console.warn("Auto sync failed", error);
-      setCloudStatus("自動同步失敗");
+      setCloudStatus("自動上傳失敗");
     });
   }, AUTO_SYNC_DEBOUNCE_MS);
+}
+
+async function autoPullCloudSync(options = {}) {
+  const { force = false } = options;
+  getCloudSettingsFromForm();
+  enableCloudAutoSyncIfPossible();
+  if (!state.cloud.autoSync || !hasCloudCredentials() || state.cloud.busy) return false;
+  if (!force && document.visibilityState !== "visible") return false;
+
+  const now = Date.now();
+  if (!force && state.cloud.lastAutoPullAt && now - state.cloud.lastAutoPullAt < CLOUD_PULL_MS - 1_000) return false;
+  state.cloud.lastAutoPullAt = now;
+  state.cloud.busy = true;
+  renderCloudSync();
+
+  try {
+    const gist = await findCloudGist();
+    if (!gist) {
+      state.cloud.status = "尚未建立雲端同步檔";
+      saveState({ sync: false });
+      return false;
+    }
+
+    state.cloud.gistId = gist.id;
+    const payload = await readCloudPayload(gist);
+    const remoteTime = cloudPayloadTime(payload);
+    const lastRemoteTime = lastKnownRemoteTime();
+
+    if (hasLocalCloudChanges()) {
+      state.cloud.busy = false;
+      await uploadCloudSync({ silent: true });
+      return true;
+    }
+
+    if ((!state.positions.length && payload.positions.length) || remoteTime > lastRemoteTime) {
+      applyCloudPayload(payload);
+      state.cloud.status = "已自動下載最新資料";
+      saveState({ sync: false });
+      renderCloudSync();
+      return true;
+    }
+
+    state.cloud.lastPulledAt = Date.now();
+    state.cloud.status = "雲端資料已是最新";
+    saveState({ sync: false });
+    renderCloudSync();
+    return false;
+  } catch (error) {
+    console.warn("Auto cloud pull failed", error);
+    state.cloud.status = "自動下載失敗";
+    renderCloudSync();
+    return false;
+  } finally {
+    state.cloud.busy = false;
+    renderCloudSync();
+  }
+}
+
+function startCloudAutoSync() {
+  if (!state.cloud.token) return;
+  enableCloudAutoSyncIfPossible();
+  saveState({ sync: false });
+  clearInterval(cloudPullTimer);
+  clearTimeout(cloudStartupTimer);
+
+  cloudStartupTimer = setTimeout(() => {
+    if (hasLocalCloudChanges()) {
+      scheduleAutoSync();
+    } else {
+      autoPullCloudSync({ force: true }).catch((error) => {
+        console.warn("Startup cloud auto pull failed", error);
+      });
+    }
+  }, CLOUD_STARTUP_SYNC_DELAY_MS);
+
+  cloudPullTimer = setInterval(() => {
+    autoPullCloudSync().catch((error) => {
+      console.warn("Cloud auto pull failed", error);
+    });
+  }, CLOUD_PULL_MS);
 }
 
 async function githubRequest(path, options = {}) {
@@ -4537,7 +4660,8 @@ async function saveCloudSettings() {
   saveState({ sync: false });
   renderCloudSync();
   if (state.cloud.autoSync && state.cloud.token) {
-    downloadCloudSync({ silent: true, overwrite: false }).catch((error) => {
+    startCloudAutoSync();
+    autoPullCloudSync({ force: true }).catch((error) => {
       console.warn("Initial cloud sync failed", error);
     });
   }
@@ -4816,7 +4940,23 @@ function bindEvents() {
 
   document.addEventListener("visibilitychange", () => {
     const stale = !state.lastSync || Date.now() - state.lastSync > REFRESH_MS;
-    if (document.visibilityState === "visible" && stale && state.positions.length) refreshPrices();
+    if (document.visibilityState !== "visible") return;
+    if (stale && state.positions.length) refreshPrices();
+    autoPullCloudSync({ force: true }).catch((error) => {
+      console.warn("Foreground cloud sync failed", error);
+    });
+  });
+
+  window.addEventListener("focus", () => {
+    autoPullCloudSync({ force: true }).catch((error) => {
+      console.warn("Focus cloud sync failed", error);
+    });
+  });
+
+  window.addEventListener("online", () => {
+    autoPullCloudSync({ force: true }).catch((error) => {
+      console.warn("Online cloud sync failed", error);
+    });
   });
 
   document.addEventListener("click", (event) => {
@@ -4859,10 +4999,14 @@ registerServiceWorker();
 unlockRefreshButton();
 setInterval(unlockRefreshButton, 2_000);
 
-if (importedDeviceSync || (state.cloud.autoSync && state.cloud.token)) {
-  downloadCloudSync({ silent: !importedDeviceSync, overwrite: importedDeviceSync || !state.positions.length }).catch((error) => {
-    console.warn("Startup cloud sync failed", error);
-  });
+if (importedDeviceSync) {
+  downloadCloudSync({ silent: false, overwrite: true })
+    .catch((error) => {
+      console.warn("Startup cloud sync failed", error);
+    })
+    .finally(startCloudAutoSync);
+} else if (state.cloud.token) {
+  startCloudAutoSync();
 }
 
 if (state.positions.length) {
