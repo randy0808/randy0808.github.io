@@ -29,6 +29,8 @@ const HISTORY_MIN_POINT_GAP_MS = 60_000;
 const HISTORY_FORCED_CHANGE_TWD = 100;
 const HISTORY_AUTO_CHANGE_TWD = 1_000;
 const HISTORY_AUTO_CHANGE_RATIO = 0.005;
+const HISTORY_KNOWN_BAD_DATE = "2026-08-25";
+const HISTORY_KNOWN_BAD_MIN_TWD = 10_000_000;
 const HISTORY_RANGE_DAYS = {
   week: 7,
   month: 31,
@@ -409,6 +411,11 @@ function historyChangeAmount(previous, valueTwd) {
   return { amount, ratio: amount / baseline };
 }
 
+function isKnownBadHistoryPoint(point) {
+  return point?.date === HISTORY_KNOWN_BAD_DATE
+    && Number(point?.valueTwd) >= HISTORY_KNOWN_BAD_MIN_TWD;
+}
+
 function shouldKeepHistoryPoint(previous, point) {
   if (!previous) return true;
   if (previous.date !== point.date) return true;
@@ -437,6 +444,7 @@ function normalizeHistoryPoints(points) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < HISTORY_START_DATE) continue;
     if (!Number.isFinite(valueTwd) || valueTwd < 0) continue;
     if (!Number.isFinite(timestamp)) continue;
+    if (isKnownBadHistoryPoint({ date, valueTwd })) continue;
     normalized.push({
       date,
       valueTwd,
